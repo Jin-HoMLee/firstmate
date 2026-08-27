@@ -137,8 +137,9 @@
 #   Before a fresh ship or scout worker starts, its clean task worktree uses the
 #   fetched tip of origin's resolved default branch when origin exists. An
 #   originless scout or local-only ship instead uses the local main or master
-#   branch without creating a remote. An originless no-mistakes or direct-PR ship
-#   is refused because it cannot safely publish. An unreachable origin,
+#   branch without creating a remote; its checked-out submodule pins must already
+#   match that local base before reset. An originless no-mistakes or direct-PR
+#   ship is refused because it cannot safely publish. An unreachable origin,
 #   unresolved default branch, or non-clean worktree refuses the spawn rather
 #   than risking work from an unverifiable base.
 #   A slot whose only deviation is a stale submodule gitlink is refused by that
@@ -1795,6 +1796,32 @@ EOF
   printf '%s' "$lines" >&2
 }
 
+local_base_submodules_match_target() {  # <worktree> <target>
+  local worktree=$1 target=$2 tree metadata mode object path have
+  tree=$(git -C "$worktree" ls-tree -r "$target") || {
+    echo "error: could not inspect submodules for originless pooled worktree '$worktree'; refusing to launch from a potentially unsafe local base" >&2
+    return 1
+  }
+  while IFS=$'\t' read -r metadata path; do
+    [ -n "$metadata" ] || continue
+    mode=${metadata%% *}
+    [ "$mode" = 160000 ] || continue
+    metadata=${metadata#* }
+    metadata=${metadata#* }
+    object=${metadata%% *}
+    have=$(git -C "$worktree/$path" rev-parse --verify --quiet HEAD 2>/dev/null) || {
+      echo "error: could not inspect submodule '$path' for originless pooled worktree '$worktree'; refusing to launch from a potentially unsafe local base" >&2
+      return 1
+    }
+    if [ "$have" != "$object" ]; then
+      echo "error: originless pooled worktree '$worktree' has submodule '$path' at $have, but local base '$target' records $object; refusing to reset or launch from a potentially stale base" >&2
+      return 1
+    fi
+  done <<EOF
+$tree
+EOF
+}
+
 freshen_spawn_worktree_local_base() {  # <worktree>
   local worktree=$1 default target expected actual status branch
   default=
@@ -1823,6 +1850,9 @@ freshen_spawn_worktree_local_base() {  # <worktree>
     else
       echo "error: pooled worktree '$worktree' is not clean; refusing to discard uncommitted work while refreshing its local base" >&2
     fi
+    return 1
+  fi
+  if ! local_base_submodules_match_target "$worktree" "$target"; then
     return 1
   fi
   if ! git -C "$worktree" reset --hard "$target" >/dev/null; then

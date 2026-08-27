@@ -604,10 +604,53 @@ test_originless_missing_local_default_refuses() {
   pass "an originless spawn refuses when no local main or master branch can be proven"
 }
 
+test_originless_changed_submodule_refuses_before_reset() {
+  local rec id out status before before_sub contract
+  for contract in scout local-only; do
+    id="originless-submodule-$contract-r16"
+    rec=$(make_submodule_case "originless-submodule-$contract" "$id")
+    read_submodule_case "$rec"
+    git -C "$PROJECT_DIR" remote remove origin
+    git -C "$PROJECT_DIR" -c protocol.file.allow=always submodule --quiet update --init
+    git -C "$PROJECT_DIR/ui" checkout --quiet "$SUBPIN2"
+    git -C "$PROJECT_DIR" add ui
+    git -C "$PROJECT_DIR" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
+      commit -qm local-advance-pin
+    if [ "$contract" = local-only ]; then
+      printf 'Delivery contract: mode=local-only\nbrief for %s\n' "$id" > "$HOME_DIR/data/$id/brief.md"
+    fi
+    before=$(git -C "$POOL_DIR" rev-parse HEAD)
+    before_sub=$(git -C "$POOL_DIR/ui" rev-parse HEAD)
+    if [ "$contract" = scout ]; then
+      out=$(run_spawn "$id" --scout)
+    else
+      out=$(run_spawn "$id" --mode local-only --yolo off)
+    fi
+    status=$?
+    [ "$status" -ne 0 ] || fail "originless $contract launched after its local base changed a submodule pin"
+    assert_contains "$out" "submodule 'ui'" \
+      "originless $contract did not identify the changed submodule pin"
+    assert_contains "$out" "refusing to reset or launch" \
+      "originless $contract did not refuse before resetting a changed submodule pin"
+    [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+      || fail "originless $contract moved the pooled superproject before refusing a changed submodule pin"
+    [ "$(git -C "$POOL_DIR/ui" rev-parse HEAD)" = "$before_sub" ] \
+      || fail "originless $contract moved the pooled submodule before refusing a changed pin"
+    [ -z "$(git -C "$PROJECT_DIR" remote -v)" ] \
+      || fail "originless $contract refusal changed the project's remote configuration"
+    [ -z "$(git -C "$POOL_DIR" remote -v)" ] \
+      || fail "originless $contract refusal added a remote to the pooled worktree"
+    assert_absent "$HOME_DIR/state/$id.meta" \
+      "originless $contract refusal published task metadata"
+  done
+  pass "originless scouts and local-only ships refuse changed submodule pins before resetting or launching"
+}
+
 test_originless_local_bases_for_scout_and_local_ship
 test_originless_publish_modes_refuse_without_origin
 test_originless_allowed_modes_refuse_dirty_pool
 test_originless_missing_local_default_refuses
+test_originless_changed_submodule_refuses_before_reset
 test_stale_pool_base_refreshes_before_branching
 test_non_main_default_branch_refreshes_before_branching
 test_direct_pr_and_scout_refresh_before_launch
