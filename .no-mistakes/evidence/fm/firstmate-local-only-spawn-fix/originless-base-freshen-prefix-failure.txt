@@ -1,0 +1,5 @@
+# Regression check: target-branch originless test cases run against pre-fix base commit 7ee0c19
+# (bin/fm-spawn.sh and docs unchanged from base; only the new test file copied in)
+
+not ok - originless scout should launch from the local default branch: expected exit 0, got 1
+exit_status=1
