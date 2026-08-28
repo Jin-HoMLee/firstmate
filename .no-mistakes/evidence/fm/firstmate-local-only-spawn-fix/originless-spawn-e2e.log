@@ -1,0 +1,34 @@
+# observed originless scout CLI: spawned originless-scout-local-base-r12 harness=codex kind=scout window=firstmate:fm-originless-scout-local-base-r12 worktree=/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/originless-scout/pool
+# observed originless scout state: HEAD=212d014f1603293626c2232180b4d0d8271b8c32 local-main=212d014f1603293626c2232180b4d0d8271b8c32 status=clean remotes=none content=must survive an originless local-base refresh kind=scout
+# observed originless local-only CLI: spawned originless-local-ship-local-base-r12 harness=codex kind=ship mode=local-only yolo=off window=firstmate:fm-originless-local-ship-local-base-r12 worktree=/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/originless-local-ship/pool
+# observed originless local-only state: HEAD=d7023e75680ae60c7762cc1239ac1fdbb1cf7617 local-master=d7023e75680ae60c7762cc1239ac1fdbb1cf7617 status=clean remotes=none content=must survive an originless local-base refresh kind=ship mode=local-only
+ok - originless scouts and local-only ships refresh clean pooled worktrees from local main or master without adding a remote
+# observed originless no-mistakes refusal: exit=1 error: pooled worktree '/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/originless-no-mistakes-refusal/pool' has no origin; refusing to launch an originless no-mistakes ship because only local-only ships and scouts may use a local base
+# observed originless direct-PR refusal: exit=1 error: pooled worktree '/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/originless-direct-PR-refusal/pool' has no origin; refusing to launch an originless direct-PR ship because only local-only ships and scouts may use a local base
+ok - originless no-mistakes and direct-PR ships remain refused without a remote
+ok - originless scouts and local-only ships refuse dirty pooled worktrees without discarding local work
+ok - an originless spawn refuses when no local main or master branch can be proven
+ok - originless scouts and local-only ships refuse changed submodule pins before resetting or launching
+ok - originless scouts and local-only ships refuse target-deleted initialized submodules before reset
+ok - originless scouts and local-only ships inspect and preserve submodule work hidden by ignore=all
+ok - originless scouts preserve clean non-ASCII submodule paths without adding a remote
+# observed spawn: spawned pool-current-base-r1 harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-pool-current-base-r1 worktree=/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/current-base/pool
+# observed base: HEAD=3b866629dd5bd5a035a2868b649fa299daecf444 origin/main=3b866629dd5bd5a035a2868b649fa299daecf444 advanced-main=must survive a newly spawned branch
+ok - a stale pooled worktree refreshes to current origin/main before a crew branch is created
+ok - a stale pooled worktree resolves and refreshes a non-main default branch
+# observed direct-pr spawn: spawned pool-direct-pr-r3 harness=codex kind=ship mode=direct-PR yolo=off window=firstmate:fm-pool-direct-pr-r3 worktree=/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/direct-pr/pool
+# observed scout spawn: spawned pool-scout-r3 harness=codex kind=scout window=firstmate:fm-pool-scout-r3 worktree=/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/scout/pool
+ok - direct-PR ships and scouts both refresh stale pooled worktrees before launch
+# observed dirty refusal: error: pooled worktree '/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/dirty-refusal/pool' is not clean; refusing to discard uncommitted work while refreshing its base; preserved=keep this local work
+ok - a dirty pooled worktree is refused without discarding its local work
+# observed unresolved-default refusal: error: could not resolve origin's current default branch for pooled worktree '/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/unresolved-default/pool'; refusing to launch from a potentially stale base
+ok - an unresolved remote default branch refuses the pooled worktree
+# observed unreachable-origin refusal: error: could not fetch origin for pooled worktree '/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T//fm-spawn-pool-base-freshen.45IZVA/unreachable-origin/pool'; refusing to launch from a potentially stale base
+ok - an unreachable origin refuses a potentially stale pooled worktree
+# observed stale-pin refusal: error: submodule 'ui' is checked out at c2fff083a56df508d8ce0ecb0880bf5c57350cd5, but this base records 06d6070a8b64f0eb0ac5bd2d66e5b2307301c845
+ok - two consecutive spawns across a moved submodule pin end in a refusal naming both pins and no remedy
+ok - an unpushed submodule commit keeps the uncommitted-work refusal and survives it
+ok - work inside a submodule is still refused as uncommitted work, not called stale
+ok - a stale pin carrying real work is refused conservatively, never called stale
+ok - a stale pin beside other dirt yields the conservative refusal alone, with no stale-pin line
+# all fm-spawn-pool-base-freshen tests passed
