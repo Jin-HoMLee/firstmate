@@ -1807,7 +1807,7 @@ local_base_submodules_match_target() {  # <worktree> <target>
   while IFS= read -r -d '' record; do
     if [ -z "$record" ]; then
       if [ "$phase" = target ]; then
-        phase=head
+        phase='head'
       else
         complete=1
       fi
