@@ -33,6 +33,32 @@ SH
   printf '%s\n' "$fakebin"
 }
 
+install_advancing_git_wrapper() {  # <fakebin>
+  local fakebin=$1
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -u
+real_git=${FM_TEST_REAL_GIT:?FM_TEST_REAL_GIT unset}
+if [ "$#" -eq 6 ] \
+   && [ "$1" = -C ] \
+   && [ "$2" = "$FM_TEST_ADVANCE_POOL" ] \
+   && [ "$3" = rev-parse ] \
+   && [ "$4" = --verify ] \
+   && [ "$5" = --quiet ] \
+   && [ "$6" = 'refs/heads/main^{commit}' ]; then
+  "$real_git" "$@"
+  status=$?
+  if [ "$status" -eq 0 ] && [ ! -e "$FM_TEST_ADVANCE_MARKER" ]; then
+    "$real_git" -C "$FM_TEST_ADVANCE_PROJECT" update-ref refs/heads/main "$FM_TEST_ADVANCE_SHA"
+    : > "$FM_TEST_ADVANCE_MARKER"
+  fi
+  exit "$status"
+fi
+exec "$real_git" "$@"
+SH
+  chmod +x "$fakebin/git"
+}
+
 make_case() {
   local name=$1 id=$2 default=${3:-main} case_dir home project origin pool publisher fakebin initial
   case_dir="$TMP_ROOT/$name"
@@ -615,6 +641,46 @@ test_originless_missing_local_default_refuses() {
   pass "an originless spawn refuses when no local main or master branch can be proven"
 }
 
+test_originless_concurrent_local_base_advance_refuses_before_reset() {
+  local rec id out status before selected next marker
+  id='originless-concurrent-base-advance-r20'
+  rec=$(make_originless_case concurrent-base-advance "$id" main)
+  read_case_record "$rec"
+  before=$(git -C "$POOL_DIR" rev-parse HEAD)
+  selected=$(git -C "$PROJECT_DIR" rev-parse main)
+
+  printf 'arrived during spawn preparation\n' > "$PROJECT_DIR/concurrent.txt"
+  git -C "$PROJECT_DIR" add concurrent.txt
+  git -C "$PROJECT_DIR" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
+    commit -qm concurrent-main-advance
+  next=$(git -C "$PROJECT_DIR" rev-parse main)
+  git -C "$PROJECT_DIR" reset --quiet --hard "$selected"
+
+  install_advancing_git_wrapper "$FAKEBIN_DIR"
+  marker="$CASE_DIR/base-advanced"
+  out=$(FM_TEST_REAL_GIT="$(command -v git)" \
+    FM_TEST_ADVANCE_POOL="$POOL_DIR" \
+    FM_TEST_ADVANCE_PROJECT="$PROJECT_DIR" \
+    FM_TEST_ADVANCE_SHA="$next" \
+    FM_TEST_ADVANCE_MARKER="$marker" \
+    run_spawn "$id" --scout)
+  status=$?
+
+  [ "$status" -ne 0 ] || fail "originless scout launched after local main changed during base preparation"
+  assert_contains "$out" "local base 'main' changed while preparing" \
+    "originless scout did not identify the concurrent local-base advance"
+  assert_present "$marker" "fixture did not advance local main during base preparation"
+  [ "$(git -C "$PROJECT_DIR" rev-parse main)" = "$next" ] \
+    || fail "fixture did not leave local main at the concurrently advanced commit"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+    || fail "originless scout moved the pooled worktree before refusing a concurrent local-base advance"
+  [ -z "$(git -C "$POOL_DIR" remote -v)" ] \
+    || fail "concurrent local-base refusal added a remote to the pooled worktree"
+  assert_absent "$HOME_DIR/state/$id.meta" \
+    "concurrent local-base refusal published task metadata"
+  pass "an originless spawn refuses a concurrent local-base advance before resetting the pooled worktree"
+}
+
 test_originless_changed_submodule_refuses_before_reset() {
   local rec id out status before before_sub contract
   for contract in scout local-only; do
@@ -757,6 +823,7 @@ test_originless_local_bases_for_scout_and_local_ship
 test_originless_publish_modes_refuse_without_origin
 test_originless_allowed_modes_refuse_dirty_pool
 test_originless_missing_local_default_refuses
+test_originless_concurrent_local_base_advance_refuses_before_reset
 test_originless_changed_submodule_refuses_before_reset
 test_originless_target_deleted_submodule_refuses_before_reset
 test_originless_ignored_submodule_work_refuses_before_reset

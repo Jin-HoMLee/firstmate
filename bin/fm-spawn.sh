@@ -139,10 +139,12 @@
 #   origin, only a scout or local-only ship may instead use local main, or master
 #   when main is absent, and no remote is created. Every submodule present in
 #   either the pooled HEAD or local base must have a clean checkout, remain a
-#   submodule in that base, and match its target pin before reset. No-mistakes
-#   and direct-PR ships without origin are refused because they cannot safely
-#   publish. An unreachable origin, unresolved default branch, or non-clean
-#   worktree refuses the spawn rather than risking work from an unverifiable base.
+#   submodule in that base, and match its target pin before reset. The selected
+#   local branch must stay at its captured commit through the refresh or the
+#   spawn is refused. No-mistakes and direct-PR ships without origin are refused
+#   because they cannot safely publish. An unreachable origin, unresolved default
+#   branch, or non-clean worktree refuses the spawn rather than risking work from
+#   an unverifiable base.
 #   A slot whose only deviation is a stale submodule gitlink is refused by that
 #   same clean check, but is reported as a stale checkout naming each submodule
 #   and both pins; nothing is converged or removed, and no remedy is suggested.
@@ -1797,8 +1799,8 @@ EOF
   printf '%s' "$lines" >&2
 }
 
-local_base_submodules_match_target() {  # <worktree> <target>
-  local worktree=$1 target=$2 record metadata mode object path have status phase complete found i
+local_base_submodules_match_target() {  # <worktree> <target-commit> <base-name>
+  local worktree=$1 target=$2 base_name=$3 record metadata mode object path have status phase complete found i
   local -a paths target_objects
   paths=()
   target_objects=()
@@ -1866,18 +1868,18 @@ local_base_submodules_match_target() {  # <worktree> <target>
       return 1
     }
     if [ -z "$object" ]; then
-      echo "error: local base '$target' no longer records submodule '$path'; refusing to reset or launch from a potentially unsafe local base" >&2
+      echo "error: local base '$base_name' no longer records submodule '$path'; refusing to reset or launch from a potentially unsafe local base" >&2
       return 1
     fi
     if [ "$have" != "$object" ]; then
-      echo "error: originless pooled worktree '$worktree' has submodule '$path' at $have, but local base '$target' records $object; refusing to reset or launch from a potentially stale base" >&2
+      echo "error: originless pooled worktree '$worktree' has submodule '$path' at $have, but local base '$base_name' records $object; refusing to reset or launch from a potentially stale base" >&2
       return 1
     fi
   done
 }
 
 freshen_spawn_worktree_local_base() {  # <worktree>
-  local worktree=$1 default target expected actual status branch
+  local worktree=$1 default target expected current actual status branch
   default=
   for branch in main master; do
     if git -C "$worktree" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -1906,16 +1908,32 @@ freshen_spawn_worktree_local_base() {  # <worktree>
     fi
     return 1
   fi
-  if ! local_base_submodules_match_target "$worktree" "$target"; then
+  if ! local_base_submodules_match_target "$worktree" "$expected" "$default"; then
     return 1
   fi
-  if ! git -C "$worktree" reset --hard "$target" >/dev/null; then
+  current=$(git -C "$worktree" rev-parse --verify --quiet "$target^{commit}" 2>/dev/null) || {
+    echo "error: local base '$default' became unreadable while preparing originless pooled worktree '$worktree'; refusing to reset or launch" >&2
+    return 1
+  }
+  if [ "$current" != "$expected" ]; then
+    echo "error: local base '$default' changed while preparing originless pooled worktree '$worktree' (selected $expected, now $current); refusing to reset or launch" >&2
+    return 1
+  fi
+  if ! git -C "$worktree" reset --hard "$expected" >/dev/null; then
     echo "error: could not reset originless pooled worktree '$worktree' to '$default'; refusing to launch from a potentially stale base" >&2
     return 1
   fi
   actual=$(git -C "$worktree" rev-parse --verify --quiet HEAD 2>/dev/null || true)
   if [ "$actual" != "$expected" ]; then
     echo "error: originless pooled worktree '$worktree' is at '${actual:-unknown}', not current '$default' ('$expected'); refusing to launch" >&2
+    return 1
+  fi
+  current=$(git -C "$worktree" rev-parse --verify --quiet "$target^{commit}" 2>/dev/null) || {
+    echo "error: local base '$default' became unreadable while refreshing originless pooled worktree '$worktree'; refusing to launch" >&2
+    return 1
+  }
+  if [ "$current" != "$expected" ]; then
+    echo "error: local base '$default' changed while refreshing originless pooled worktree '$worktree' (selected $expected, now $current); refusing to launch" >&2
     return 1
   fi
 }
