@@ -137,11 +137,12 @@
 #   Before a fresh ship or scout worker starts, its clean task worktree uses the
 #   fetched tip of origin's resolved default branch when origin exists. An
 #   originless scout or local-only ship instead uses the local main or master
-#   branch without creating a remote; its checked-out submodule pins must already
-#   match that local base before reset. An originless no-mistakes or direct-PR
-#   ship is refused because it cannot safely publish. An unreachable origin,
-#   unresolved default branch, or non-clean worktree refuses the spawn rather
-#   than risking work from an unverifiable base.
+#   branch without creating a remote; every submodule present in either the
+#   pooled HEAD or local base must have a clean checkout, remain a submodule in
+#   that base, and match its target pin before reset. An originless no-mistakes
+#   or direct-PR ship is refused because it cannot safely publish. An unreachable
+#   origin, unresolved default branch, or non-clean worktree refuses the spawn
+#   rather than risking work from an unverifiable base.
 #   A slot whose only deviation is a stale submodule gitlink is refused by that
 #   same clean check, but is reported as a stale checkout naming each submodule
 #   and both pins; nothing is converged or removed, and no remedy is suggested.
@@ -1797,29 +1798,82 @@ EOF
 }
 
 local_base_submodules_match_target() {  # <worktree> <target>
-  local worktree=$1 target=$2 tree metadata mode object path have
-  tree=$(git -C "$worktree" ls-tree -r "$target") || {
-    echo "error: could not inspect submodules for originless pooled worktree '$worktree'; refusing to launch from a potentially unsafe local base" >&2
-    return 1
-  }
-  while IFS=$'\t' read -r metadata path; do
-    [ -n "$metadata" ] || continue
+  local worktree=$1 target=$2 record metadata mode object path have status phase complete found i
+  local -a paths target_objects
+  paths=()
+  target_objects=()
+  phase=target
+  complete=0
+  while IFS= read -r -d '' record; do
+    if [ -z "$record" ]; then
+      if [ "$phase" = target ]; then
+        phase=head
+      else
+        complete=1
+      fi
+      continue
+    fi
+    metadata=${record%%$'\t'*}
+    if [ "$metadata" = "$record" ]; then
+      complete=0
+      break
+    fi
+    path=${record#*$'\t'}
     mode=${metadata%% *}
     [ "$mode" = 160000 ] || continue
     metadata=${metadata#* }
     metadata=${metadata#* }
     object=${metadata%% *}
+    if [ "$phase" = target ]; then
+      paths[${#paths[@]}]=$path
+      target_objects[${#target_objects[@]}]=$object
+      continue
+    fi
+    found=0
+    for ((i = 0; i < ${#paths[@]}; i++)); do
+      if [ "${paths[$i]}" = "$path" ]; then
+        found=1
+        break
+      fi
+    done
+    if [ "$found" -eq 0 ]; then
+      paths[${#paths[@]}]=$path
+      target_objects[${#target_objects[@]}]=
+    fi
+  done < <(
+    git -C "$worktree" ls-tree -rz --full-tree "$target" &&
+      printf '\0' &&
+      git -C "$worktree" ls-tree -rz --full-tree HEAD &&
+      printf '\0'
+  )
+  if [ "$complete" -ne 1 ]; then
+    echo "error: could not inspect submodules for originless pooled worktree '$worktree'; refusing to launch from a potentially unsafe local base" >&2
+    return 1
+  fi
+  for ((i = 0; i < ${#paths[@]}; i++)); do
+    path=${paths[$i]}
+    object=${target_objects[$i]}
+    status=$(git -C "$worktree/$path" -c core.quotePath=false status --porcelain --untracked-files=all 2>/dev/null) || {
+      echo "error: could not inspect submodule '$path' for originless pooled worktree '$worktree'; refusing to launch from a potentially unsafe local base" >&2
+      return 1
+    }
+    if [ -n "$status" ]; then
+      echo "error: originless pooled worktree '$worktree' submodule '$path' contains uncommitted work; refusing to reset or launch" >&2
+      return 1
+    fi
     have=$(git -C "$worktree/$path" rev-parse --verify --quiet HEAD 2>/dev/null) || {
       echo "error: could not inspect submodule '$path' for originless pooled worktree '$worktree'; refusing to launch from a potentially unsafe local base" >&2
       return 1
     }
+    if [ -z "$object" ]; then
+      echo "error: local base '$target' no longer records submodule '$path'; refusing to reset or launch from a potentially unsafe local base" >&2
+      return 1
+    fi
     if [ "$have" != "$object" ]; then
       echo "error: originless pooled worktree '$worktree' has submodule '$path' at $have, but local base '$target' records $object; refusing to reset or launch from a potentially stale base" >&2
       return 1
     fi
-  done <<EOF
-$tree
-EOF
+  done
 }
 
 freshen_spawn_worktree_local_base() {  # <worktree>

@@ -262,8 +262,8 @@ test_unresolved_remote_default_refuses_pool() {
 # operator. Nothing here is converged - the gate only has to say why. The fixture
 # only builds the repositories; the residue itself is produced by a real spawn, so
 # these tests cover the reset that actually strands the submodule.
-make_submodule_case() {  # <name> <id>
-  local name=$1 id=$2 case_dir home project origin pool publisher fakebin sub subpin1 subpin2 advanced
+make_submodule_case() {  # <name> <id> [submodule-path]
+  local name=$1 id=$2 submodule_path=${3:-ui} case_dir home project origin pool publisher fakebin sub subpin1 subpin2 advanced
   case_dir="$TMP_ROOT/$name"
   home="$case_dir/home"
   project="$case_dir/project"
@@ -292,7 +292,7 @@ make_submodule_case() {  # <name> <id>
   printf 'base\n' > "$project/README.md"
   git -C "$project" add README.md
   git -C "$project" -c protocol.file.allow=always -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
-    submodule --quiet add "file://$sub" ui
+    submodule --quiet add "file://$sub" "$submodule_path"
   git -C "$project" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
   git clone --quiet --bare "$project" "$origin"
   git -C "$project" remote add origin "file://$origin"
@@ -302,16 +302,16 @@ make_submodule_case() {  # <name> <id>
   # Advance origin and move the submodule pin, exactly as the field incident did.
   git clone --quiet "file://$origin" "$publisher"
   git -C "$publisher" -c protocol.file.allow=always submodule --quiet update --init
-  git -C "$publisher/ui" checkout --quiet "$subpin2"
+  git -C "$publisher/$submodule_path" checkout --quiet "$subpin2"
   git -C "$publisher" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qam advance-pin
   git -C "$publisher" push --quiet origin main
   advanced=$(git -C "$publisher" rev-parse HEAD)
 
-  printf '%s\n' "$case_dir|$home|$project|$pool|$fakebin|$subpin1|$subpin2|$advanced"
+  printf '%s\n' "$case_dir|$home|$project|$pool|$fakebin|$subpin1|$subpin2|$advanced|$submodule_path"
 }
 
 read_submodule_case() {
-  IFS='|' read -r CASE_DIR HOME_DIR PROJECT_DIR POOL_DIR FAKEBIN_DIR SUBPIN1 SUBPIN2 ADVANCED_SHA <<EOF
+  IFS='|' read -r CASE_DIR HOME_DIR PROJECT_DIR POOL_DIR FAKEBIN_DIR SUBPIN1 SUBPIN2 ADVANCED_SHA SUBMODULE_PATH <<EOF
 $1
 EOF
 }
@@ -646,11 +646,110 @@ test_originless_changed_submodule_refuses_before_reset() {
   pass "originless scouts and local-only ships refuse changed submodule pins before resetting or launching"
 }
 
+test_originless_target_deleted_submodule_refuses_before_reset() {
+  local rec id out status before before_sub contract
+  for contract in scout local-only; do
+    id="originless-deleted-submodule-$contract-r17"
+    rec=$(make_submodule_case "originless-deleted-submodule-$contract" "$id")
+    read_submodule_case "$rec"
+    git -C "$PROJECT_DIR" remote remove origin
+    git -C "$PROJECT_DIR" rm -qf -- "$SUBMODULE_PATH"
+    git -C "$PROJECT_DIR" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
+      commit -qm local-delete-submodule
+    if [ "$contract" = local-only ]; then
+      printf 'Delivery contract: mode=local-only\nbrief for %s\n' "$id" > "$HOME_DIR/data/$id/brief.md"
+    fi
+    before=$(git -C "$POOL_DIR" rev-parse HEAD)
+    before_sub=$(git -C "$POOL_DIR/$SUBMODULE_PATH" rev-parse HEAD)
+    if [ "$contract" = scout ]; then
+      out=$(run_spawn "$id" --scout)
+    else
+      out=$(run_spawn "$id" --mode local-only --yolo off)
+    fi
+    status=$?
+    [ "$status" -ne 0 ] || fail "originless $contract launched after its local base deleted an initialized submodule"
+    assert_contains "$out" "no longer records submodule '$SUBMODULE_PATH'" \
+      "originless $contract did not identify the target-deleted submodule"
+    [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+      || fail "originless $contract moved the pooled superproject before refusing a target-deleted submodule"
+    [ "$(git -C "$POOL_DIR/$SUBMODULE_PATH" rev-parse HEAD)" = "$before_sub" ] \
+      || fail "originless $contract moved the target-deleted submodule before refusing"
+    [ -z "$(git -C "$POOL_DIR" remote -v)" ] \
+      || fail "originless $contract target-deletion refusal added a remote"
+    assert_absent "$HOME_DIR/state/$id.meta" \
+      "originless $contract target-deletion refusal published task metadata"
+  done
+  pass "originless scouts and local-only ships refuse target-deleted initialized submodules before reset"
+}
+
+test_originless_ignored_submodule_work_refuses_before_reset() {
+  local rec id out status before before_sub contract
+  for contract in scout local-only; do
+    id="originless-ignored-submodule-$contract-r18"
+    rec=$(make_submodule_case "originless-ignored-submodule-$contract" "$id")
+    read_submodule_case "$rec"
+    git -C "$PROJECT_DIR" remote remove origin
+    git -C "$POOL_DIR" config submodule."$SUBMODULE_PATH".ignore all
+    printf 'work hidden from the superproject\n' > "$POOL_DIR/$SUBMODULE_PATH/keep-me.txt"
+    [ -z "$(git -C "$POOL_DIR" status --porcelain)" ] \
+      || fail "fixture did not hide submodule work from superproject status"
+    if [ "$contract" = local-only ]; then
+      printf 'Delivery contract: mode=local-only\nbrief for %s\n' "$id" > "$HOME_DIR/data/$id/brief.md"
+    fi
+    before=$(git -C "$POOL_DIR" rev-parse HEAD)
+    before_sub=$(git -C "$POOL_DIR/$SUBMODULE_PATH" rev-parse HEAD)
+    if [ "$contract" = scout ]; then
+      out=$(run_spawn "$id" --scout)
+    else
+      out=$(run_spawn "$id" --mode local-only --yolo off)
+    fi
+    status=$?
+    [ "$status" -ne 0 ] || fail "originless $contract launched with submodule work hidden by ignore=all"
+    assert_contains "$out" "submodule '$SUBMODULE_PATH' contains uncommitted work" \
+      "originless $contract did not identify work hidden inside the submodule"
+    [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+      || fail "originless $contract moved the pooled superproject before refusing hidden submodule work"
+    [ "$(git -C "$POOL_DIR/$SUBMODULE_PATH" rev-parse HEAD)" = "$before_sub" ] \
+      || fail "originless $contract moved the submodule while refusing hidden work"
+    assert_grep 'work hidden from the superproject' "$POOL_DIR/$SUBMODULE_PATH/keep-me.txt" \
+      "originless $contract discarded submodule work hidden by ignore=all"
+    assert_absent "$HOME_DIR/state/$id.meta" \
+      "originless $contract hidden-work refusal published task metadata"
+  done
+  pass "originless scouts and local-only ships inspect and preserve submodule work hidden by ignore=all"
+}
+
+test_originless_unusual_submodule_path_launches_cleanly() {
+  local rec id out status before_sub
+  id='originless-unusual-submodule-path-r19'
+  rec=$(make_submodule_case originless-unusual-submodule-path "$id" 'módulo')
+  read_submodule_case "$rec"
+  git -C "$PROJECT_DIR" remote remove origin
+  before_sub=$(git -C "$POOL_DIR/$SUBMODULE_PATH" rev-parse HEAD)
+
+  out=$(run_spawn "$id" --scout)
+  status=$?
+  expect_code 0 "$status" "originless scout should support a clean non-ASCII submodule path"
+  assert_contains "$out" "spawned $id" "originless scout with a non-ASCII submodule path did not report success"
+  [ "$(git -C "$POOL_DIR/$SUBMODULE_PATH" rev-parse HEAD)" = "$before_sub" ] \
+    || fail "originless scout moved the clean submodule at a non-ASCII path"
+  [ -z "$(git -C "$POOL_DIR" status --porcelain)" ] \
+    || fail "originless scout with a non-ASCII submodule path left the pooled worktree dirty"
+  [ -z "$(git -C "$POOL_DIR" remote -v)" ] \
+    || fail "originless scout with a non-ASCII submodule path added a remote"
+  assert_present "$HOME_DIR/state/$id.meta" \
+    "originless scout with a non-ASCII submodule path did not publish task metadata"
+  pass "originless scouts preserve clean non-ASCII submodule paths without adding a remote"
+}
+
 test_originless_local_bases_for_scout_and_local_ship
 test_originless_publish_modes_refuse_without_origin
 test_originless_allowed_modes_refuse_dirty_pool
 test_originless_missing_local_default_refuses
 test_originless_changed_submodule_refuses_before_reset
+test_originless_target_deleted_submodule_refuses_before_reset
+test_originless_ignored_submodule_work_refuses_before_reset
+test_originless_unusual_submodule_path_launches_cleanly
 test_stale_pool_base_refreshes_before_branching
 test_non_main_default_branch_refreshes_before_branching
 test_direct_pr_and_scout_refresh_before_launch
