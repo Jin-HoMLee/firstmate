@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # Regression tests for fm-spawn's pooled-worktree base refresh.
 #
-# A treehouse pool can return a clean detached worktree whose origin/main was
+# A treehouse pool can return a clean detached worktree whose accepted base was
 # advanced after the worktree was allocated.
-# These tests drive the real spawn path with a fake terminal, then prove it
-# starts the worker from the fetched origin/main tip or stops when origin is
-# unreachable. Originless cases prove a scout or local-only ship instead
-# starts from the local main or master tip without adding a remote, and that
-# an originless no-mistakes or direct-PR ship is still refused.
+# These tests drive the real spawn path with a fake terminal and exercise the
+# base-refresh policy and safety refusals owned by bin/fm-spawn.sh's header.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -504,6 +501,11 @@ test_originless_local_bases_for_scout_and_local_ship() {
     || fail "originless scout added a remote to the pooled worktree"
   assert_present "$HOME_DIR/state/$id.meta" "originless scout did not publish task metadata"
   assert_grep 'kind=scout' "$HOME_DIR/state/$id.meta" "originless scout metadata has the wrong kind"
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+    printf '# observed originless scout CLI: %s\n' "$(printf '%s\n' "$out" | tail -n 1)"
+    printf '# observed originless scout state: HEAD=%s local-main=%s status=clean remotes=none content=%s kind=scout\n' \
+      "$(git -C "$POOL_DIR" rev-parse HEAD)" "$current" "$(cat "$POOL_DIR/advanced-local-base.txt")"
+  fi
 
   id='originless-local-ship-local-base-r12'
   rec=$(make_originless_case originless-local-ship "$id" master)
@@ -529,6 +531,11 @@ test_originless_local_bases_for_scout_and_local_ship() {
   assert_present "$HOME_DIR/state/$id.meta" "originless local-only ship did not publish task metadata"
   assert_grep 'kind=ship' "$HOME_DIR/state/$id.meta" "originless local-only ship metadata has the wrong kind"
   assert_grep 'mode=local-only' "$HOME_DIR/state/$id.meta" "originless local-only ship metadata has the wrong mode"
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+    printf '# observed originless local-only CLI: %s\n' "$(printf '%s\n' "$out" | tail -n 1)"
+    printf '# observed originless local-only state: HEAD=%s local-master=%s status=clean remotes=none content=%s kind=ship mode=local-only\n' \
+      "$(git -C "$POOL_DIR" rev-parse HEAD)" "$current" "$(cat "$POOL_DIR/advanced-local-base.txt")"
+  fi
   pass "originless scouts and local-only ships refresh clean pooled worktrees from local main or master without adding a remote"
 }
 
@@ -551,6 +558,10 @@ test_originless_publish_modes_refuse_without_origin() {
     [ -z "$(git -C "$POOL_DIR" remote -v)" ] \
       || fail "originless $mode refusal added a remote to the pooled worktree"
     assert_absent "$HOME_DIR/state/$id.meta" "originless $mode refusal published task metadata"
+    if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+      printf '# observed originless %s refusal: exit=%s %s\n' \
+        "$mode" "$status" "$(printf '%s\n' "$out" | grep 'has no origin' | head -n 1)"
+    fi
   done
   pass "originless no-mistakes and direct-PR ships remain refused without a remote"
 }

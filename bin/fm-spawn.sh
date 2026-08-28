@@ -135,14 +135,14 @@
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
 #   git worktree root distinct from the primary project checkout.
 #   Before a fresh ship or scout worker starts, its clean task worktree uses the
-#   fetched tip of origin's resolved default branch when origin exists. An
-#   originless scout or local-only ship instead uses the local main or master
-#   branch without creating a remote; every submodule present in either the
-#   pooled HEAD or local base must have a clean checkout, remain a submodule in
-#   that base, and match its target pin before reset. An originless no-mistakes
-#   or direct-PR ship is refused because it cannot safely publish. An unreachable
-#   origin, unresolved default branch, or non-clean worktree refuses the spawn
-#   rather than risking work from an unverifiable base.
+#   fetched tip of origin's resolved default branch when origin exists. Without
+#   origin, only a scout or local-only ship may instead use local main, or master
+#   when main is absent, and no remote is created. Every submodule present in
+#   either the pooled HEAD or local base must have a clean checkout, remain a
+#   submodule in that base, and match its target pin before reset. No-mistakes
+#   and direct-PR ships without origin are refused because they cannot safely
+#   publish. An unreachable origin, unresolved default branch, or non-clean
+#   worktree refuses the spawn rather than risking work from an unverifiable base.
 #   A slot whose only deviation is a stale submodule gitlink is refused by that
 #   same clean check, but is reported as a stale checkout naming each submodule
 #   and both pins; nothing is converged or removed, and no remedy is suggested.
