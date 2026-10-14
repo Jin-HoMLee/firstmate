@@ -1,0 +1,67 @@
+{
+  "skill_name": "application-dossier-production",
+  "evals": [
+    {
+      "id": "no-letter-form",
+      "prompt": "Prepare a new dossier from the supplied Lever posting and read-only form capture. The form has no cover-letter field, and the current CV export and application repository are available.",
+      "expected_output": "A route-aware CV-only dossier with cover_letter set to the canonical no-letter value, no submission-letter attachment, an evidence map with claim boundaries, and a coherent artifact manifest.",
+      "assertions": [
+        "The route is classified as CV-only or no-letter.",
+        "The live form is treated as read-only and later uncaptured fields are not invented.",
+        "The intended attachments exclude a cover letter.",
+        "The dossier keeps materials readiness separate from eligibility and submission authorization."
+      ]
+    },
+    {
+      "id": "email-primary-fallback",
+      "prompt": "Refresh an email-primary application package after the employer changed the recipient and attachment instructions. Keep the portal fallback for reference, but do not submit or contact the employer.",
+      "expected_output": "A refreshed package with the email route authoritative, the fallback explicitly retained and non-parallel, reconciled attachments, and no contact or submission.",
+      "assertions": [
+        "The current employer source controls recipient and attachment facts.",
+        "The fallback is recorded as non-parallel.",
+        "No submission or contact is performed or implied as completed."
+      ]
+    },
+    {
+      "id": "partial-form-capture",
+      "prompt": "Review a multi-step authenticated application form whose first three pages were captured read-only but whose later pages require filling to advance. Make the dossier as complete as the evidence allows.",
+      "expected_output": "A bounded partial dossier that records the capture boundary, distinguishes inaccessible fields from genuinely absent values, and does not invent later form content.",
+      "assertions": [
+        "The exact capture boundary is recorded.",
+        "Later fields are not fabricated.",
+        "Inaccessible or unauthorized sources are not labelled as missing."
+      ]
+    },
+    {
+      "id": "stale-refresh",
+      "prompt": "Audit an existing application package before it is made submit-ready. Its application YAML has the current requisition, while the checklist and manifest still reference an older requisition and an old artifact.",
+      "expected_output": "A semantic coherence audit that reconciles all canonical records, removes superseded route references, and verifies the current artifact chain.",
+      "assertions": [
+        "All canonical records are compared rather than only recently changed files.",
+        "Superseded requisition and artifact references are identified and corrected.",
+        "The package is not called ready while contradictions remain."
+      ]
+    },
+    {
+      "id": "artifact-chain",
+      "prompt": "Finalize the package artifact after the applications repository accepted the manifest standard. Verify the committed PDF, full manifest SHA-256, primary clone, filename prefix, actual upload source, and post-upload record without uploading anything now.",
+      "expected_output": "A reconciliation that treats the full manifest hash as authoritative, checks the _sha256-first8 filename, rejects disposable worker copies as upload sources, and records that no upload occurred in this task.",
+      "assertions": [
+        "The full SHA-256 is checked and remains authoritative over the filename prefix.",
+        "The filename prefix is derived from the full hash.",
+        "The reconciled primary clone and actual upload source are distinguished from a disposable worker copy.",
+        "No upload is performed."
+      ]
+    },
+    {
+      "id": "post-submit-reconciliation",
+      "prompt": "Reconcile a dossier after a separately authorized application submission. Preserve the receipt, verify which source was uploaded, and make the package safe against accidental resubmission.",
+      "expected_output": "A post-event reconciliation with receipt preservation, source and manifest agreement, an explicit no-resubmit boundary, and no second submission.",
+      "assertions": [
+        "The existing submission is recorded rather than repeated.",
+        "The receipt and upload source are preserved.",
+        "The package includes an explicit no-resubmit boundary."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+[
+  {"query":"Prepare a dossier for this new role URL, including the evidence map and the files the application route actually accepts.","should_trigger":true},
+  {"query":"Refresh the existing application package because the live form and requisition changed.","should_trigger":true},
+  {"query":"Make this CV-only Lever application package submit-ready and reconcile its attachments.","should_trigger":true},
+  {"query":"Build the email-primary application dossier and retain the portal as a non-parallel fallback.","should_trigger":true},
+  {"query":"Review this stale job application folder for contradictions across the YAML, checklist, form mirror, and manifest.","should_trigger":true},
+  {"query":"Reconcile the application package after submission and preserve the receipt without resubmitting.","should_trigger":true},
+  {"query":"The authenticated Oracle form only exposed three pages read-only; make a bounded dossier and do not invent the rest.","should_trigger":true},
+  {"query":"Finalize the PDF artifact chain and prove the committed file, full SHA-256, primary clone, upload source, and post-upload record agree.","should_trigger":true},
+  {"query":"Prepare the application answers and decide which requirements are meets, partial, or gaps using the current CV facts.","should_trigger":true},
+  {"query":"Update this application package after the employer added a required note field and changed the attachment limit.","should_trigger":true},
+  {"query":"Submit the already prepared application through the employer portal.","should_trigger":false},
+  {"query":"Upload the PDF to the ATS and click the final submit button.","should_trigger":false},
+  {"query":"Deploy the application dashboard so the hiring team can view these packages.","should_trigger":false},
+  {"query":"Change the priority ranking of these jobs in the dashboard.","should_trigger":false},
+  {"query":"Write interview questions for the Stanford role using the dossier as background.","should_trigger":false},
+  {"query":"Edit the universal CV content and add the new publication to every position variant.","should_trigger":false},
+  {"query":"Fix the renderer bug that makes the dashboard HTML omit the location column.","should_trigger":false},
+  {"query":"Use the browser to fill this employer form, but do not prepare or review an application dossier.","should_trigger":false},
+  {"query":"Decide whether I should accept the sponsorship question and whether relocation is worth it.","should_trigger":false},
+  {"query":"Change the applications repository schema so all packages require a cover letter.","should_trigger":false}
+]
