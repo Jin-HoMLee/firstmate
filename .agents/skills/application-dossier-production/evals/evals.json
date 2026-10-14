@@ -48,6 +48,7 @@
       "expected_output": "A reconciliation that treats the full manifest hash as authoritative, checks the _sha256-first8 filename, rejects disposable worker copies as upload sources, and records that no upload occurred in this task.",
       "assertions": [
         "The full SHA-256 is checked and remains authoritative over the filename prefix.",
+        "The canonical artifact filename is required to carry `_sha256-<first8>` unconditionally, not only when a local artifact standard happens to ask for it.",
         "The filename prefix is derived from the full hash.",
         "The reconciled primary clone and actual upload source are distinguished from a disposable worker copy.",
         "No upload is performed."

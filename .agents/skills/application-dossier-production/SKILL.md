@@ -1,8 +1,9 @@
 ---
 name: application-dossier-production
 description: >-
-  Agent-only procedure for scoping, creating, refreshing, final-reviewing, or reconciling a job-application dossier in a project with a canonical dossier contract.
-  Load whenever the captain asks to prepare, update, finalize, review, or make submit-ready an application package, including its CV, letter or note, evidence map, form answers, artifact manifest, or upload reconciliation.
+  Agent-only procedure for creating or materially refreshing a job-application dossier in a project with a canonical dossier contract, covering scoping a new package, updating one after a route or requirement change, final-reviewing it, and reconciling an upload record.
+  Load whenever the captain asks to prepare, scope, update, finalize, review, or make submit-ready an application package, including its CV, letter or note, evidence map, form answers, artifact manifest, or upload reconciliation.
+  An ordinary status-only edit to an already coherent package needs no load.
   Owns dossier content-production sequencing and cross-record coherence only; it does not submit applications, operate forms beyond the task's authority, deploy dashboards, make captain decisions, or own delivery.
 user-invocable: false
 metadata:
@@ -54,7 +55,7 @@ Do not treat dossier preparation as permission to log in, fill, upload, contact,
 Use the existing CV and application export contracts to produce package-local artifacts and update the authoritative attachment manifest.
 Verify each artifact's existence, exact full SHA-256, MIME or file type, size, page count where applicable, source SHA, variant, and submission-attachment flag.
 The manifest's full SHA-256 is authoritative over any filename prefix.
-When the artifact standard requires it, the filename must include `_sha256-<first8>` derived from that full manifest hash.
+Every canonical application artifact in this workflow must carry `_sha256-<first8>` in its filename, derived from that full manifest hash.
 
 Reconcile one artifact chain end to end: the committed artifact, its full manifest SHA-256, the reconciled primary project clone, the `_sha256-<first8>` filename, the actual upload source, and the post-upload record must agree.
 A disposable worker copy is never a durable local link and never an upload source.

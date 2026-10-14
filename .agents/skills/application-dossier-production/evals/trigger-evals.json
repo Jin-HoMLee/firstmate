@@ -9,6 +9,8 @@
   {"query":"Finalize the PDF artifact chain and prove the committed file, full SHA-256, primary clone, upload source, and post-upload record agree.","should_trigger":true},
   {"query":"Prepare the application answers and decide which requirements are meets, partial, or gaps using the current CV facts.","should_trigger":true},
   {"query":"Update this application package after the employer added a required note field and changed the attachment limit.","should_trigger":true},
+  {"query":"Scope a new application dossier for this role: decide what records and artifacts the route needs before any drafting starts.","should_trigger":true},
+  {"query":"Update the status field of an already coherent application package after the employer confirmed receipt, with no artifact, route, or content change.","should_trigger":false},
   {"query":"Submit the already prepared application through the employer portal.","should_trigger":false},
   {"query":"Upload the PDF to the ATS and click the final submit button.","should_trigger":false},
   {"query":"Deploy the application dashboard so the hiring team can view these packages.","should_trigger":false},
