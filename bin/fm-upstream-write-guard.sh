@@ -59,7 +59,9 @@ normalize_repo() {
       value=$path
       ;;
     git@github.com:*) value=${value#git@github.com:} ;;
+    git@ssh.github.com:*) value=${value#git@ssh.github.com:} ;;
     github.com/*) value=${value#github.com/} ;;
+    ssh.github.com/*) value=${value#ssh.github.com/} ;;
   esac
   value=${value#repos/}
   value=${value#/repos/}
@@ -197,7 +199,7 @@ classify_gh() {
       [ "$SUB" = list ] || MUTATION=1
       ;;
     api)
-      REPO_SCOPED=1
+      [ -n "$TARGET" ] && REPO_SCOPED=1
       for arg in "$@"; do
         case "$arg" in
           -X|--method) method=EXPECT ;;
@@ -290,7 +292,7 @@ parse_git_push() {
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=origin
   fi
   case "$GIT_REMOTE" in
-    *://*|git@github.com:*|github.com/*) GIT_REMOTE_URL=$GIT_REMOTE ;;
+    *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*) GIT_REMOTE_URL=$GIT_REMOTE ;;
     *) GIT_REMOTE_URL=$(git -C "$GIT_REPO_DIR" remote get-url --push "$GIT_REMOTE" 2>/dev/null || true) ;;
   esac
   [ -n "$GIT_REMOTE_URL" ] || return 2

@@ -52,6 +52,11 @@ expect_allowed gh pr view 48 --repo kunchenguid/dotfiles
 expect_allowed gh-axi api GET /repos/kunchenguid/dotfiles/pulls/48
 pass "read-only protected-upstream operations remain available"
 
+expect_allowed gh api -X POST /user
+expect_allowed gh api -X PUT /user
+expect_allowed gh api -X POST /gists
+pass "non-repository gh api mutations remain available"
+
 expect_refused gh-axi pr create --title accidental
 expect_refused gh pr create --title accidental
 assert_contains "$(cat "$TMP_ROOT/err")" "must name its exact repository" \
@@ -80,7 +85,9 @@ pass "git push destination classification blocks the protected remote without ne
 for ssh_url in \
   ssh://git@ssh.github.com:443/kunchenguid/dotfiles.git \
   ssh://git@github.com:22/kunchenguid/dotfiles.git \
-  ssh://git@ssh.github.com/kunchenguid/dotfiles.git; do
+  ssh://git@ssh.github.com/kunchenguid/dotfiles.git \
+  git@ssh.github.com:kunchenguid/dotfiles.git \
+  ssh.github.com/kunchenguid/dotfiles.git; do
   status=0
   "$GUARD" check git push "$ssh_url" main >"$TMP_ROOT/ssh.out" 2>"$TMP_ROOT/ssh.err" || status=$?
   [ "$status" -eq 2 ] || fail "git push to $ssh_url should be refused locally, got $status"
@@ -138,6 +145,32 @@ done
 policy_nested_read=$(node "$POLICY" --root "$ROOT" --command '( gh-axi pr view 48 -R kunchenguid/dotfiles )')
 [ "$policy_nested_read" = allow ] || fail "primary shell policy blocked a nested read-only operation: $policy_nested_read"
 pass "primary shell policy classifies protected writes inside groups, subshells, and -c payloads"
+
+for flow in \
+  'if true; then gh pr create -R kunchenguid/dotfiles --title x; fi' \
+  'for x in 1; do gh pr create -R kunchenguid/dotfiles --title x; done' \
+  'while false; do gh pr create -R kunchenguid/dotfiles --title x; done' \
+  'case x in x) gh pr create -R kunchenguid/dotfiles --title x ;; esac' \
+  'time gh pr create -R kunchenguid/dotfiles --title x' \
+  '! gh pr create -R kunchenguid/dotfiles --title x'; do
+  policy_flow=$(node "$POLICY" --root "$ROOT" --command "$flow")
+  case "$policy_flow" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a control-flow protected write: $flow -> $policy_flow" ;;
+  esac
+done
+deep_open=$(printf '(%0.s' {1..14})
+deep_close=$(printf ')%0.s' {1..14})
+policy_deep=$(node "$POLICY" --root "$ROOT" --command "${deep_open}gh pr create -R kunchenguid/dotfiles --title x${deep_close}")
+case "$policy_deep" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a deeply nested protected write: $policy_deep" ;;
+esac
+policy_flow_read=$(node "$POLICY" --root "$ROOT" --command 'if gh pr view 48 -R kunchenguid/dotfiles; then echo ok; fi')
+[ "$policy_flow_read" = allow ] || fail "primary shell policy blocked a read-only control-flow operation: $policy_flow_read"
+policy_flow_echo=$(node "$POLICY" --root "$ROOT" --command 'for f in 1; do echo gh; done')
+[ "$policy_flow_echo" = allow ] || fail "primary shell policy blocked a control-flow echo: $policy_flow_echo"
+pass "primary shell policy fails closed on control-flow and deeply nested protected writes"
 
 primary="$TMP_ROOT/plain-primary"
 mkdir -p "$primary/bin"

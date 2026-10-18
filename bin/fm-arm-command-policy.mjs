@@ -614,7 +614,7 @@ function hasUnclassifiableProtectedExpansion(word, root) {
   return /(?:^|\/)fm-watch/.test(word.value);
 }
 
-function shellInvocation(position) {
+export function shellInvocation(position) {
   if (!position.command) return null;
   const name = basename(position.command.value);
   if (!["sh", "bash", "zsh"].includes(name)) return null;
@@ -649,13 +649,13 @@ function shellInvocation(position) {
   return { kind: "stdin", payload: null };
 }
 
-function shellHeredocPayloads(tokens, position) {
+export function shellHeredocPayloads(tokens, position) {
   if (shellInvocation(position)?.kind !== "stdin") return [];
   const heredocs = tokens.filter((token) => token.type === "redir" && token.fd === 0 && typeof token.heredoc === "string");
   return heredocs.length === 0 ? [] : [heredocs.at(-1).heredoc];
 }
 
-function shellHereStringPayloads(tokens, position) {
+export function shellHereStringPayloads(tokens, position) {
   if (shellInvocation(position)?.kind !== "stdin") return [];
   const payloads = [];
   for (let i = 0; i < tokens.length; i += 1) {
@@ -672,11 +672,77 @@ function sourcedScript(position) {
   return position.words[position.index + 1] || null;
 }
 
-function evalPayload(position) {
+export function evalPayload(position) {
   if (!position.command || basename(position.command.value) !== "eval") return null;
   const payloads = position.words.slice(position.index + 1);
   if (payloads.length === 0 || payloads.some((payload) => !payload.literal || payload.subs.length > 0)) return null;
   return payloads.map((payload) => payload.value).join(" ");
+}
+
+const SHELL_RESERVED_WORDS = new Set([
+  "if", "then", "else", "elif", "fi", "for", "while", "until", "case",
+  "esac", "do", "done", "function", "time", "coproc", "!",
+]);
+
+function shiftPastReservedWords(position) {
+  let index = position.index;
+  while (index < position.words.length) {
+    const name = basename(position.words[index].value);
+    if (SHELL_RESERVED_WORDS.has(name) || /^-[^-]/.test(position.words[index].value)) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  return {
+    words: position.words,
+    index,
+    command: position.words[index],
+    wrappers: position.wrappers,
+    prefixAssignments: position.prefixAssignments,
+    unresolvedWrapperOption: position.unresolvedWrapperOption,
+    wrapperPayloads: position.wrapperPayloads,
+  };
+}
+
+export function analyzeShellCommands(command, { depthLimit = 64 } = {}) {
+  const positions = [];
+  let error = "";
+  function visit(source, depth) {
+    if (depth > depthLimit) {
+      if (!error) error = "recursion limit";
+      return;
+    }
+    const lexed = new Lexer(source).tokenize();
+    if (lexed.error) {
+      if (!error) error = lexed.error;
+      return;
+    }
+    const program = splitProgram(lexed.tokens);
+    for (const tokens of program.nodes) {
+      const raw = commandPosition(tokens);
+      const position = raw.command && SHELL_RESERVED_WORDS.has(basename(raw.command.value))
+        ? shiftPastReservedWords(raw)
+        : raw;
+      positions.push({ tokens, position });
+      for (const payload of position.wrapperPayloads) visit(payload, depth + 1);
+      for (const token of tokens) {
+        if (token.type === "group") visit(token.content, depth + 1);
+        if (token.type === "word") {
+          for (const substitution of token.subs) visit(substitution.content, depth + 1);
+        }
+      }
+      const shell = shellInvocation(position);
+      if (shell?.kind === "command" && shell.payload) visit(shell.payload.value, depth + 1);
+      const literalEval = evalPayload(position);
+      if (literalEval !== null) visit(literalEval, depth + 1);
+      for (const payload of [...shellHeredocPayloads(tokens, position), ...shellHereStringPayloads(tokens, position)]) {
+        visit(payload, depth + 1);
+      }
+    }
+  }
+  visit(command, 0);
+  return { error, positions };
 }
 
 function wordReferencesAny(word, names) {
@@ -765,7 +831,7 @@ function analyzeProgram(command, context, depth = 0) {
     const position = commandPosition(tokens);
     const nodeContext = contextWithAssignments(activeContext, position.words);
     const firstName = basename(position.words[0]?.value || "");
-    if (["if", "then", "else", "elif", "fi", "for", "while", "until", "case", "esac", "do", "done", "function", "time", "coproc"].includes(firstName)) {
+    if (SHELL_RESERVED_WORDS.has(firstName)) {
       unsupported = true;
     }
 
