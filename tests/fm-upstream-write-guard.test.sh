@@ -77,6 +77,20 @@ status=0
 [ ! -e "$remote/refs/heads/test" ] || fail "protected push unexpectedly changed the local bare remote"
 pass "git push destination classification blocks the protected remote without network access"
 
+for ssh_url in \
+  ssh://git@ssh.github.com:443/kunchenguid/dotfiles.git \
+  ssh://git@github.com:22/kunchenguid/dotfiles.git \
+  ssh://git@ssh.github.com/kunchenguid/dotfiles.git; do
+  status=0
+  "$GUARD" check git push "$ssh_url" main >"$TMP_ROOT/ssh.out" 2>"$TMP_ROOT/ssh.err" || status=$?
+  [ "$status" -eq 2 ] || fail "git push to $ssh_url should be refused locally, got $status"
+  status=0
+  "$GUARD" pre-push upstream "$ssh_url" >"$TMP_ROOT/sshpre.out" 2>"$TMP_ROOT/sshpre.err" || status=$?
+  [ "$status" -eq 2 ] || fail "pre-push for $ssh_url should be refused, got $status"
+  [ ! -e "$remote/refs/heads/test" ] || fail "ssh-url push unexpectedly changed the local bare remote"
+done
+pass "ssh.github.com and port-qualified git URLs resolve to the protected upstream"
+
 project_marker="$TMP_ROOT/project-pre-push.log"
 cat >"$repo/.git/hooks/pre-push" <<SH
 #!/usr/bin/env bash
@@ -110,6 +124,20 @@ assert_contains "$(cat "$TMP_ROOT/policy.out")" $'deny\tprotected-upstream-write
   "primary shell policy did not deny the dangerous GitHub command"
 policy_read=$(node "$POLICY" --root "$ROOT" --command 'gh-axi pr view 48 -R kunchenguid/dotfiles')
 [ "$policy_read" = allow ] || fail "primary shell policy blocked a read-only upstream operation: $policy_read"
+
+for wrapped in \
+  "( gh pr create -R kunchenguid/dotfiles --title x )" \
+  "bash -c 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  'echo $(gh pr create -R kunchenguid/dotfiles --title x)'; do
+  policy_nested=$(node "$POLICY" --root "$ROOT" --command "$wrapped")
+  case "$policy_nested" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a nested protected write: $wrapped -> $policy_nested" ;;
+  esac
+done
+policy_nested_read=$(node "$POLICY" --root "$ROOT" --command '( gh-axi pr view 48 -R kunchenguid/dotfiles )')
+[ "$policy_nested_read" = allow ] || fail "primary shell policy blocked a nested read-only operation: $policy_nested_read"
+pass "primary shell policy classifies protected writes inside groups, subshells, and -c payloads"
 
 primary="$TMP_ROOT/plain-primary"
 mkdir -p "$primary/bin"

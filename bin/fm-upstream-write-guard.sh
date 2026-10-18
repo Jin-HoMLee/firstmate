@@ -51,7 +51,11 @@ normalize_repo() {
       host=${host#*@}
       path=${host#*/}
       host=${host%%/*}
-      [ "$(lower "$host")" = github.com ] || return 1
+      host=${host%%:*}
+      case "$(lower "$host")" in
+        github.com|ssh.github.com) ;;
+        *) return 1 ;;
+      esac
       value=$path
       ;;
     git@github.com:*) value=${value#git@github.com:} ;;
