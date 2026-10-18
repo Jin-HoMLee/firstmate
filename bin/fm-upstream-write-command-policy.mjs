@@ -49,7 +49,7 @@ function decodeWord(word) {
 }
 
 function rawLexErrorMention(command, root) {
-  const words = command.split(/\s+/).map(decodeWord);
+  const words = command.split(/[\s;&|<>()]+/).map(decodeWord);
   for (let i = 0; i < words.length; i += 1) {
     const tool = base(words[i] || "");
     if (!GUARD_TOOLS.has(tool)) continue;
@@ -92,6 +92,16 @@ function pushDestinationExplicit(info) {
   return /^(?:git@(?:github|ssh\.github)\.com:|(?:github|ssh\.github)\.com\/)/.test(remote);
 }
 
+function isDirectoryChange(position) {
+  const tool = base(position.command?.value || "");
+  if (tool === "cd" || tool === "pushd" || tool === "popd") return true;
+  if (tool === "builtin") {
+    const name = position.words[position.index + 1]?.value;
+    return name === "cd" || name === "pushd" || name === "popd";
+  }
+  return false;
+}
+
 function decision(command, root = defaultRoot) {
   const { error, positions } = analyzeShellCommands(command);
   for (const { position } of positions) {
@@ -108,8 +118,7 @@ function decision(command, root = defaultRoot) {
         reason: "git push after cd/pushd cannot be resolved to its repository locally; refusing before network access",
       };
     }
-    const tool = base(position.command?.value || "");
-    if (tool === "cd" || tool === "pushd" || tool === "popd") directoryChanged = true;
+    if (isDirectoryChange(position)) directoryChanged = true;
   }
   if (error === "recursion limit") {
     return {

@@ -42,7 +42,7 @@ die() { printf 'error: %s\n' "$1" >&2; exit 2; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 normalize_repo() {
-  local value=$1 host path
+  local value=$1 host path lower_value
   value=${value%/}
   value=${value%.git}
   case "$value" in
@@ -58,10 +58,11 @@ normalize_repo() {
       esac
       value=$path
       ;;
-    git@github.com:*) value=${value#git@github.com:} ;;
-    git@ssh.github.com:*) value=${value#git@ssh.github.com:} ;;
-    github.com/*) value=${value#github.com/} ;;
-    ssh.github.com/*) value=${value#ssh.github.com/} ;;
+  esac
+  lower_value=$(lower "$value")
+  case "$lower_value" in
+    git@github.com:*|git@ssh.github.com:*) value=${value#*:} ;;
+    github.com/*|ssh.github.com/*) value=${value#*/} ;;
   esac
   value=${value#repos/}
   value=${value#/repos/}
@@ -158,7 +159,7 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg method=GET query=
+  local tool=$1 arg method=GET query= query_seen=0
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -209,13 +210,18 @@ classify_gh() {
             ;;
           -f|--field|-F|--raw-field|--input) [ "$method" = GET ] && method=POST ;;
           -f=*|--field=*|-F=*|--raw-field=*|--input=*) [ "$method" = GET ] && method=POST ;;
-          query=*) query=${arg#query=} ;;
+          query=*) query=${arg#query=}; query_seen=1 ;;
         esac
       done
       method=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
-      case "$method" in GET|HEAD) ;; *) MUTATION=1 ;; esac
-      if [ "$SUB" = graphql ] && [ "$MUTATION" -eq 1 ]; then
-        case "$query" in *mutation*) ;; *) MUTATION=0 ;; esac
+      if [ "$SUB" = graphql ]; then
+        if [ "$query_seen" -eq 1 ]; then
+          case "$query" in *mutation*) MUTATION=1 ;; *) MUTATION=0 ;; esac
+        else
+          MUTATION=1
+        fi
+      else
+        case "$method" in GET|HEAD) ;; *) MUTATION=1 ;; esac
       fi
       ;;
     repo)
