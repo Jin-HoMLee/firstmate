@@ -47,7 +47,12 @@ fi
 PREFILTER=${CMD//\\/}
 PREFILTER=${PREFILTER//\"/}
 PREFILTER=${PREFILTER//\'/}
-case "$PREFILTER" in *gh*|*git*push*) ;; *) exit 0 ;; esac
+case "$CMD" in
+  *"\$'"*|*'$"'*) ;;
+  *)
+    case "$PREFILTER" in *gh*|*git*push*) ;; *) exit 0 ;; esac
+    ;;
+esac
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P) || exit 0
 FM_ROOT=${FM_ROOT_OVERRIDE:-$(CDPATH='' cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)} || exit 0

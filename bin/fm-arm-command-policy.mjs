@@ -694,14 +694,15 @@ function shiftPastReservedWords(position) {
     }
     break;
   }
+  const unwrapped = commandPosition(position.words.slice(index));
   return {
     words: position.words,
-    index,
-    command: position.words[index],
-    wrappers: position.wrappers,
-    prefixAssignments: position.prefixAssignments,
-    unresolvedWrapperOption: position.unresolvedWrapperOption,
-    wrapperPayloads: position.wrapperPayloads,
+    index: index + unwrapped.index,
+    command: unwrapped.command,
+    wrappers: [...position.wrappers, ...unwrapped.wrappers],
+    prefixAssignments: position.prefixAssignments + unwrapped.prefixAssignments,
+    unresolvedWrapperOption: position.unresolvedWrapperOption || unwrapped.unresolvedWrapperOption,
+    wrapperPayloads: [...position.wrapperPayloads, ...unwrapped.wrapperPayloads],
   };
 }
 

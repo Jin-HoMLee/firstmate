@@ -152,7 +152,12 @@ for flow in \
   'while false; do gh pr create -R kunchenguid/dotfiles --title x; done' \
   'case x in x) gh pr create -R kunchenguid/dotfiles --title x ;; esac' \
   'time gh pr create -R kunchenguid/dotfiles --title x' \
-  '! gh pr create -R kunchenguid/dotfiles --title x'; do
+  '! gh pr create -R kunchenguid/dotfiles --title x' \
+  'if true; then sudo gh pr create -R kunchenguid/dotfiles --title x; fi' \
+  'for x in 1; do env gh pr create -R kunchenguid/dotfiles --title x; done' \
+  'while true; do nohup gh pr create -R kunchenguid/dotfiles --title x; done' \
+  'time sudo gh pr create -R kunchenguid/dotfiles --title x' \
+  '! sudo gh pr create -R kunchenguid/dotfiles --title x'; do
   policy_flow=$(node "$POLICY" --root "$ROOT" --command "$flow")
   case "$policy_flow" in
     deny*) ;;
@@ -170,6 +175,8 @@ policy_flow_read=$(node "$POLICY" --root "$ROOT" --command 'if gh pr view 48 -R 
 [ "$policy_flow_read" = allow ] || fail "primary shell policy blocked a read-only control-flow operation: $policy_flow_read"
 policy_flow_echo=$(node "$POLICY" --root "$ROOT" --command 'for f in 1; do echo gh; done')
 [ "$policy_flow_echo" = allow ] || fail "primary shell policy blocked a control-flow echo: $policy_flow_echo"
+policy_flow_wrap_read=$(node "$POLICY" --root "$ROOT" --command 'if true; then sudo gh pr view 48 -R kunchenguid/dotfiles; fi')
+[ "$policy_flow_wrap_read" = allow ] || fail "primary shell policy blocked a read-only wrapped control-flow operation: $policy_flow_wrap_read"
 pass "primary shell policy fails closed on control-flow and deeply nested protected writes"
 
 primary="$TMP_ROOT/plain-primary"
@@ -191,6 +198,11 @@ assert_contains "$(cat "$TMP_ROOT/primary.err")" "protected-upstream-write" \
 FM_ROOT_OVERRIDE="$primary" "$primary/bin/fm-upstream-write-pretool-check.sh" \
   --command 'gh pr view 48 --repo kunchenguid/dotfiles' \
   || fail "plain primary PreToolUse transport blocked a read"
+status=0
+FM_ROOT_OVERRIDE="$primary" "$primary/bin/fm-upstream-write-pretool-check.sh" \
+  --command "\$'\\x67\\x68' pr create -R kunchenguid/dotfiles --title accidental" \
+  >"$TMP_ROOT/ansi.out" 2>"$TMP_ROOT/ansi.err" || status=$?
+[ "$status" -eq 2 ] || fail "plain primary PreToolUse transport should deny the ANSI-C quoted protected write, got $status"
 pass "ordinary primary shell commands share the same write guard"
 
 words="$TMP_ROOT/captain-words.txt"
