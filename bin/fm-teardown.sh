@@ -3288,8 +3288,8 @@ cleanup_firstmate_home_children() {
       "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged" \
       "$sub_state/$child_id.devin-config.json" \
       "$sub_state/.$child_id.branch-outcome-index"
-    chmod u+w "$sub_state/$child_id.git-hooks" 2>/dev/null || true
-    rm -rf "$sub_state/$child_id.git-hooks"
+    chmod u+w "$sub_state/$child_id.git-hooks" "$sub_state/$child_id.github-guard-bin" 2>/dev/null || true
+    rm -rf "$sub_state/$child_id.git-hooks" "$sub_state/$child_id.github-guard-bin"
   done
 }
 
@@ -3748,10 +3748,10 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
 # The steering inbox (bin/fm-task-inbox-lib.sh) is runtime state for the
 # retired endpoint; teardown only runs after landing is confirmed, so any
 # leftover unhandled steer here is moot rather than unlanded work.
-# state/<id>.git-hooks is the spawn-owned commit-msg strip directory, left
-# read-only by its installer.
-chmod u+w "$STATE/$ID.git-hooks" 2>/dev/null || true
-rm -rf "$STATE/$ID.inbox" "$STATE/$ID.git-hooks"
+# The spawn-owned git hook and GitHub guard directories are left read-only by
+# their installers.
+chmod u+w "$STATE/$ID.git-hooks" "$STATE/$ID.github-guard-bin" 2>/dev/null || true
+rm -rf "$STATE/$ID.inbox" "$STATE/$ID.git-hooks" "$STATE/$ID.github-guard-bin"
 # The record is gone, so the backlog must not still show this task in flight
 # when teardown reports success. Still under this task's meta lock, so a steer
 # racing the same id stays serialized exactly as it was before. A captain-held

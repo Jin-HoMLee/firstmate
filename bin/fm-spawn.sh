@@ -1193,6 +1193,7 @@ RELAUNCH_REPLACEMENT_WT=
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 GIT_HOOKS_DIR=
+GITHUB_GUARD_DIR=
 SPAWN_LAUNCH_SENT=0
 SPAWN_ENDPOINT_CLOSED=0
 
@@ -1361,8 +1362,8 @@ spawn_abort_cleanup() {
     { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; } &&
     fm_lock_try_acquire "$SPAWN_TASK_LOCK"; then
     if [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
-      chmod u+w "$GIT_HOOKS_DIR" 2>/dev/null || true
-      rm -rf "$GIT_HOOKS_DIR" 2>/dev/null || true
+      chmod u+w "$GIT_HOOKS_DIR" "$GITHUB_GUARD_DIR" 2>/dev/null || true
+      rm -rf "$GIT_HOOKS_DIR" "$GITHUB_GUARD_DIR" 2>/dev/null || true
     fi
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
@@ -4676,8 +4677,9 @@ EOF
   esac
 fi
 
-# Per-task git hooksPath that strips AI commit trailers at the commit object.
-# Installed for every kind, including secondmate: Cursor and other non-Claude
+# Per-task git hooksPath that strips AI commit trailers and refuses pushes to
+# protected upstream remotes, plus PATH shims that classify gh and gh-axi before
+# either CLI runs. Installed for every kind, including secondmate: Cursor and other non-Claude
 # runtimes inject the trailer after the typed message, so the typed message is
 # not the object. The pane receives this directory via GIT_CONFIG_* below,
 # which overrides a project's husky core.hooksPath without rewriting it; the
@@ -4686,7 +4688,12 @@ fi
 # rather than shipping a runtime that cannot strip.
 GIT_HOOKS_DIR="$STATE_REAL/$ID.git-hooks"
 "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "$GIT_HOOKS_DIR" "$WT" || {
-  echo "error: could not install the AI-trailer strip hooks for $ID" >&2
+  echo "error: could not install the git safety hooks for $ID" >&2
+  exit 1
+}
+GITHUB_GUARD_DIR="$STATE_REAL/$ID.github-guard-bin"
+"$FM_ROOT/bin/fm-upstream-write-guard.sh" install-shims "$GITHUB_GUARD_DIR" || {
+  echo "error: could not install the GitHub upstream-write guard for $ID" >&2
   exit 1
 }
 
@@ -5027,7 +5034,7 @@ fi
 # config files and is inherited by child git processes. An export statement
 # inside the pane command, like COMPACT_ADVISER_DISABLE below, so it reaches
 # every step of a compound raw launch while firstmate's own git is unchanged.
-LAUNCH="export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=$(shell_quote "$GIT_HOOKS_DIR"); $LAUNCH"
+LAUNCH="export PATH=$(shell_quote "$GITHUB_GUARD_DIR"):\$PATH; export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=$(shell_quote "$GIT_HOOKS_DIR"); $LAUNCH"
 # Every agent this fleet launches - crewmate, scout, and secondmate, on a fresh
 # spawn and on a relaunch alike - runs with the compact-adviser kill switch on.
 # This is an export statement rather than a forwarded ambient name or a
@@ -5082,6 +5089,8 @@ spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
 # pre-launch channel, so later commands in that shell inherit it too. The launch
 # command independently establishes the value for the agent process itself.
 spawn_send_text_line "$T" "export COMPACT_ADVISER_DISABLE=1"
+# Keep the pane shell itself guarded too, not only the launched agent process.
+spawn_send_text_line "$T" "export PATH=$(shell_quote "$GITHUB_GUARD_DIR"):\$PATH"
 if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
   spawn_send_text_line "$T" "export LAVISH_AXI_HOST=$(shell_quote "$LAVISH_AXI_HOST")"
 fi

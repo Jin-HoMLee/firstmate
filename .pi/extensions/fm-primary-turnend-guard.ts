@@ -508,6 +508,10 @@ function runCdCheck(command: string): Promise<{ code: number; stderr: string }> 
   return runChecker("fm-cd-pretool-check.sh", command);
 }
 
+function runUpstreamWriteCheck(command: string): Promise<{ code: number; stderr: string }> {
+  return runChecker("fm-upstream-write-pretool-check.sh", command);
+}
+
 export default function (pi: ExtensionAPI) {
   let sessionstartGeneration: SessionstartGeneration | null = null;
   let sessionstartExitListenerRegistered = false;
@@ -594,6 +598,10 @@ export default function (pi: ExtensionAPI) {
     const cdResult = await runCdCheck(command);
     if (cdResult.code === 2) {
       return { block: true, reason: cdResult.stderr.trim() || "denied by the cd-guard PreToolUse seatbelt" };
+    }
+    const upstreamResult = await runUpstreamWriteCheck(command);
+    if (upstreamResult.code === 2) {
+      return { block: true, reason: upstreamResult.stderr.trim() || "denied by the protected-upstream write guard" };
     }
     const result = await runPretoolCheck(command);
     if (result.code !== 2) return {};
