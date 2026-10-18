@@ -252,6 +252,10 @@ check_gh() {
     refuse_reason "conflicting or incomplete repository selectors; refusing before any GitHub operation"
     return 2
   fi
+  if [ "$TOP" = api ] && [ "$SUB" = graphql ] && [ "$MUTATION" -eq 1 ] && [ -z "$TARGET" ]; then
+    refuse_reason "gh api graphql mutation must name its exact repository with -R/--repo (query-body targets cannot be verified locally)"
+    return 2
+  fi
   if [ "$MUTATION" -eq 1 ] && [ "$REPO_SCOPED" -eq 1 ] && [ -z "$TARGET" ]; then
     refuse_reason "repository mutation '$tool $TOP $SUB' must name its exact repository with -R/--repo (fork-aware defaults are forbidden)"
     return 2

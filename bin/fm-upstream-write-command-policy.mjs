@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeShellCommands } from "./fm-arm-command-policy.mjs";
+import { analyzeShellCommands, Lexer } from "./fm-arm-command-policy.mjs";
 
 const self = fileURLToPath(import.meta.url);
 const defaultRoot = resolve(dirname(self), "..");
@@ -40,8 +40,16 @@ function classifyPosition(position, root) {
   return checkTool(tool, args, root);
 }
 
+function decodeWord(word) {
+  const lexed = new Lexer(word).tokenize();
+  if (!lexed.error && lexed.tokens.length === 1 && lexed.tokens[0].type === "word") {
+    return lexed.tokens[0].value;
+  }
+  return word.replace(/\\(.)/g, "$1").replace(/['"]/g, "");
+}
+
 function rawLexErrorMention(command, root) {
-  const words = command.split(/\s+/);
+  const words = command.split(/\s+/).map(decodeWord);
   for (let i = 0; i < words.length; i += 1) {
     const tool = base(words[i] || "");
     if (!GUARD_TOOLS.has(tool)) continue;
@@ -50,11 +58,58 @@ function rawLexErrorMention(command, root) {
   return false;
 }
 
+function gitPushInfo(position) {
+  if (!position.command || base(position.command.value) !== "git") return null;
+  const args = position.words.slice(position.index + 1).map((word) => word.value);
+  let afterPush = false;
+  let expectC = false;
+  let hasC = false;
+  let remote = "";
+  for (const arg of args) {
+    if (expectC) {
+      hasC = true;
+      expectC = false;
+      continue;
+    }
+    if (!afterPush) {
+      if (arg === "-C") expectC = true;
+      else if (arg.length > 2 && arg.startsWith("-C")) hasC = true;
+      else if (arg === "push") afterPush = true;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+    remote = arg;
+    break;
+  }
+  if (!afterPush) return null;
+  return { hasC, remote };
+}
+
+function pushDestinationExplicit(info) {
+  if (info.hasC) return true;
+  const remote = info.remote || "";
+  if (remote.includes("://")) return true;
+  return /^(?:git@(?:github|ssh\.github)\.com:|(?:github|ssh\.github)\.com\/)/.test(remote);
+}
+
 function decision(command, root = defaultRoot) {
   const { error, positions } = analyzeShellCommands(command);
   for (const { position } of positions) {
     const denied = classifyPosition(position, root);
     if (denied) return denied;
+  }
+  let directoryChanged = false;
+  for (const { position } of positions) {
+    const info = gitPushInfo(position);
+    if (info && !pushDestinationExplicit(info) && directoryChanged) {
+      return {
+        decision: "deny",
+        code: "protected-upstream-write",
+        reason: "git push after cd/pushd cannot be resolved to its repository locally; refusing before network access",
+      };
+    }
+    const tool = base(position.command?.value || "");
+    if (tool === "cd" || tool === "pushd" || tool === "popd") directoryChanged = true;
   }
   if (error === "recursion limit") {
     return {
