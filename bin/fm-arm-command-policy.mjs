@@ -482,6 +482,10 @@ const WRAPPER_OPTIONS = {
   nohup: { noArgument: new Set(), takesArgument: new Set() },
   sudo: { noArgument: new Set(["A", "B", "b", "E", "e", "H", "i", "K", "k", "l", "N", "n", "P", "S", "s", "v", "V"]), takesArgument: new Set(["C", "D", "g", "h", "p", "r", "R", "t", "T", "u", "U"]) },
   timeout: { noArgument: new Set(["f", "p", "v"]), takesArgument: new Set(["k", "s"]) },
+  nice: { noArgument: new Set(), takesArgument: new Set(["n"]) },
+  stdbuf: { noArgument: new Set(), takesArgument: new Set(["i", "o", "e"]) },
+  setsid: { noArgument: new Set(["c", "f", "w"]), takesArgument: new Set() },
+  watch: { noArgument: new Set(["d", "b", "e", "g", "t", "x", "c", "p", "q", "w", "h", "v"]), takesArgument: new Set(["n"]) },
 };
 
 const WRAPPER_LONG_OPTIONS = {
@@ -491,6 +495,10 @@ const WRAPPER_LONG_OPTIONS = {
   nohup: { noArgument: new Set(["help", "version"]), takesArgument: new Set() },
   sudo: { noArgument: new Set(["askpass", "background", "bell", "edit", "help", "login", "non-interactive", "preserve-env", "preserve-groups", "remove-timestamp", "reset-timestamp", "set-home", "shell", "stdin", "validate", "version"]), takesArgument: new Set(["chdir", "chroot", "close-from", "command-timeout", "group", "host", "other-user", "prompt", "role", "type", "user"]) },
   timeout: { noArgument: new Set(["foreground", "preserve-status", "verbose", "help", "version"]), takesArgument: new Set(["kill-after", "signal"]) },
+  nice: { noArgument: new Set(["help", "version"]), takesArgument: new Set(["adjustment"]) },
+  stdbuf: { noArgument: new Set(["help", "version"]), takesArgument: new Set(["input", "output", "error"]) },
+  setsid: { noArgument: new Set(["ctty", "fork", "wait", "help", "version"]), takesArgument: new Set() },
+  watch: { noArgument: new Set(["differences", "beep", "errexit", "chgexit", "no-title", "exec", "color", "precise", "quiet", "no-wrap", "help", "version"]), takesArgument: new Set(["interval"]) },
 };
 
 function consumeWrapperOptions(name, words, index) {
@@ -553,7 +561,7 @@ export function commandPosition(tokens) {
   let command = words[index];
   while (command) {
     const name = basename(command.value);
-    if (name === "exec" || name === "command" || name === "sudo" || name === "nohup") {
+    if (name === "exec" || name === "command" || name === "sudo" || name === "nohup" || name === "nice" || name === "stdbuf" || name === "setsid" || name === "watch") {
       wrappers.push(name);
       const options = consumeWrapperOptions(name, words, index + 1);
       unresolvedWrapperOption ||= options.unresolved;
@@ -588,6 +596,12 @@ export function commandPosition(tokens) {
         unresolvedWrapperOption = true;
         break;
       }
+      continue;
+    }
+    if (name === "builtin") {
+      wrappers.push(name);
+      index += 1;
+      command = words[index];
       continue;
     }
     break;
