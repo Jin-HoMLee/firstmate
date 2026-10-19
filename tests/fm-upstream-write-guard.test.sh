@@ -70,6 +70,20 @@ expect_allowed gh-axi pr create -R Jin-HoMLee/dotfiles --title intended
 expect_allowed gh pr create --repo Jin-HoMLee/dotfiles --title intended
 pass "both GitHub CLIs block protected writes and allow an explicit personal fork"
 
+expect_allowed gh repo create myrepo
+expect_allowed gh repo create myorg/myrepo
+expect_refused gh repo create kunchenguid/newrepo
+expect_refused gh repo create KUNCHENGUID/newrepo
+pass "gh repo create allows own-account creation and blocks protected owners"
+
+policy_repo_own=$(node "$POLICY" --root "$ROOT" --command 'gh repo create myrepo')
+[ "$policy_repo_own" = allow ] || fail "primary shell policy blocked own-account repo creation: $policy_repo_own"
+policy_repo_protected=$(node "$POLICY" --root "$ROOT" --command 'gh repo create kunchenguid/newrepo')
+case "$policy_repo_protected" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a protected repo creation: $policy_repo_protected" ;;
+esac
+
 repo="$TMP_ROOT/repo"
 remote="$TMP_ROOT/remote.git"
 fm_git_init_commit "$repo"

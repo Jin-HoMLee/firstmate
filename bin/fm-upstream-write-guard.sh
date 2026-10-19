@@ -251,7 +251,11 @@ classify_gh() {
       fi
       ;;
     repo)
-      case "$SUB" in list|view|clone|'') ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+      case "$SUB" in
+        list|view|clone|'') ;;
+        create) MUTATION=1; [ -n "$TARGET" ] && REPO_SCOPED=1 ;;
+        *) MUTATION=1; REPO_SCOPED=1 ;;
+      esac
       ;;
     stack)
       case "$SUB" in submit|merge) MUTATION=1; REPO_SCOPED=1 ;; link)
