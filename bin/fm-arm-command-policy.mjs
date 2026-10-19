@@ -676,7 +676,7 @@ export function shellHereStringPayloads(tokens, position) {
     const token = tokens[i];
     if (token.type !== "redir" || token.value !== "<<<" || token.fd !== 0) continue;
     const payload = tokens[i + 1];
-    if (payload?.type === "word" && payload.literal && payload.subs.length === 0) payloads.push(payload.value);
+    if (payload?.type === "word") payloads.push(payload.value);
   }
   return payloads;
 }
@@ -864,9 +864,8 @@ export function analyzeProgram(command, context, depth = 0, depthLimit = 12) {
       nodeNestedProtected ||= Boolean(protectedIdentity(script.value, context.root)) || wordReferencesAny(script, nodeContext.protectedVariables);
       unclassifiableProtected ||= hasUnclassifiableProtectedExpansion(script, context.root);
     }
-    if (shellPayload && (!shellPayload.literal || shellPayload.subs.length > 0)) {
+    if (shellPayload) {
       if (wordReferencesAny(shellPayload, nodeContext.protectedVariables)) nodeNestedProtected = true;
-    } else if (shellPayload) {
       const nested = analyzeProgram(shellPayload.value, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
