@@ -90,11 +90,22 @@ expect_allowed gh repo create --help
 expect_allowed gh repo edit --help
 pass "gh repo create/edit parse -h as --homepage, not help, while --help stays allowed"
 
+expect_refused gh repo edit -h https://github.com/someuser/somerepo kunchenguid/dotfiles
+expect_refused gh repo edit --homepage https://github.com/someuser/somerepo kunchenguid/dotfiles
+expect_refused gh repo edit --default-branch feature/x kunchenguid/dotfiles
+expect_refused gh repo edit -h https://github.com/someuser/somerepo
+expect_allowed gh repo create myrepo --source https://github.com/kunchenguid/dotfiles
+expect_allowed gh repo create myrepo --template https://github.com/kunchenguid/dotfiles
+pass "gh repo edit skips homepage/branch flag values when locating its destination"
+
 expect_allowed gh repo fork kunchenguid/dotfiles
 expect_allowed gh repo fork Jin-HoMLee/dotfiles
 expect_refused gh repo fork kunchenguid/dotfiles --org kunchenguid --fork-name newname
 expect_refused gh repo fork someuser/somerepo --org kunchenguid
 expect_refused gh repo fork someuser/somerepo --org=kunchenguid
+expect_refused gh repo fork someuser/somerepo --org otherorg --org kunchenguid
+expect_refused gh repo fork someuser/somerepo --org kunchenguid --org otherorg
+expect_refused gh repo fork someuser/somerepo --org=otherorg --org=kunchenguid
 expect_allowed gh repo fork kunchenguid/dotfiles --org otherorg
 pass "gh repo fork allows protected-source reads but refuses a protected-org destination"
 
@@ -116,6 +127,16 @@ policy_create_source=$(node "$POLICY" --root "$ROOT" --command 'gh repo create m
 [ "$policy_create_source" = allow ] || fail "primary shell policy blocked own-account creation from a protected source: $policy_create_source"
 policy_fork=$(node "$POLICY" --root "$ROOT" --command 'gh repo fork kunchenguid/dotfiles')
 [ "$policy_fork" = allow ] || fail "primary shell policy blocked a protected-source fork: $policy_fork"
+policy_repo_edit_homepage=$(node "$POLICY" --root "$ROOT" --command 'gh repo edit -h https://github.com/someuser/somerepo kunchenguid/dotfiles')
+case "$policy_repo_edit_homepage" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a protected repo edit with a homepage flag value: $policy_repo_edit_homepage" ;;
+esac
+policy_fork_dup_org=$(node "$POLICY" --root "$ROOT" --command 'gh repo fork someuser/somerepo --org otherorg --org kunchenguid')
+case "$policy_fork_dup_org" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a protected-org fork with a duplicate org flag: $policy_fork_dup_org" ;;
+esac
 policy_agent_task=$(node "$POLICY" --root "$ROOT" --command 'gh agent-task create -R kunchenguid/dotfiles x')
 case "$policy_agent_task" in
   deny*) ;;

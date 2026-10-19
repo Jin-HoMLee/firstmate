@@ -87,19 +87,45 @@ repo_is_protected() {
 }
 
 fork_org() {
-  local arg expect_org=0
+  local arg expect_org=0 protected=0
   for arg in "$@"; do
     if [ "$expect_org" -eq 1 ]; then
       expect_org=0
-      printf '%s\n' "$(lower "$arg")"
-      return 0
+      [ "$(lower "$arg")" = "$PROTECTED_OWNER" ] && protected=1
+      continue
     fi
     case "$arg" in
       --org) expect_org=1 ;;
-      --org=*) printf '%s\n' "$(lower "${arg#--org=}")"; return 0 ;;
+      --org=*) [ "$(lower "${arg#--org=}")" = "$PROTECTED_OWNER" ] && protected=1 ;;
     esac
   done
-  return 1
+  [ "$protected" -eq 1 ]
+}
+
+repo_destination() {
+  local arg expect_flag_value=0
+  for arg in "$@"; do
+    if [ "$expect_flag_value" -eq 1 ]; then
+      expect_flag_value=0
+      continue
+    fi
+    case "$arg" in
+      -b|--branch|-q|--jq|-t|--template|-d|--description|-h|--homepage|-s|--source|-R|--repo|-g|--gitignore|-l|--license|-r|--remote|-p|--team|--json|--fork-name|--org|--remote-name|--default-branch|--add-topic|--remove-topic|--squash-merge-commit-message|--visibility)
+        expect_flag_value=1
+        continue
+        ;;
+      --branch=*|--jq=*|--template=*|--description=*|--homepage=*|--source=*|--repo=*|--gitignore=*|--license=*|--remote=*|--team=*|--json=*|--fork-name=*|--org=*|--remote-name=*|--default-branch=*|--add-topic=*|--remove-topic=*|--squash-merge-commit-message=*|--visibility=*)
+        continue
+        ;;
+      -b?*|-q?*|-t?*|-d?*|-h?*|-s?*|-R?*|-g?*|-l?*|-r?*|-p?*)
+        continue
+        ;;
+    esac
+    case "$arg" in
+      -*) continue ;;
+      */*) set_target "$arg" repo-positional; break ;;
+    esac
+  done
 }
 
 TOP='' SUB='' TARGET='' MUTATION=0 REPO_SCOPED=0
@@ -131,7 +157,7 @@ parse_top_sub_and_target() {
       --repo=*) set_target "${arg#--repo=}" explicit-repository ;;
       -R?*) set_target "${arg#-R}" explicit-repository ;;
       https://github.com/*|http://github.com/*|git@github.com:*|github.com/*)
-        set_target "$arg" github-url
+        [ "$TOP" = repo ] || set_target "$arg" github-url
         ;;
     esac
     if [ "$seen_top" -eq 0 ]; then
@@ -160,43 +186,14 @@ parse_top_sub_and_target() {
 
   if [ "$TOP" = repo ]; then
     case "$SUB" in
-      view|fork|edit|archive|delete|rename|sync)
-        for arg in "$@"; do
-          case "$arg" in */*) set_target "$arg" repo-positional; break ;; esac
-        done
-        ;;
-      create)
-        local expect_flag_value=0
-        for arg in "$@"; do
-          if [ "$expect_flag_value" -eq 1 ]; then
-            expect_flag_value=0
-            continue
-          fi
-          case "$arg" in
-            -d|--description|-g|--gitignore|-h|--homepage|-l|--license|-r|--remote|-s|--source|-t|--team|-p|--template)
-              expect_flag_value=1
-              continue
-              ;;
-            --description=*|--gitignore=*|--homepage=*|--license=*|--remote=*|--source=*|--team=*|--template=*)
-              continue
-              ;;
-            -d?*|-g?*|-h?*|-l?*|-r?*|-s?*|-t?*|-p?*)
-              continue
-              ;;
-          esac
-          case "$arg" in
-            -*) continue ;;
-            */*) set_target "$arg" repo-positional; break ;;
-          esac
-        done
-        ;;
+      view|fork|edit|archive|delete|rename|sync|create) repo_destination "$@" ;;
     esac
   fi
   : "$tool" "$previous"
 }
 
 classify_gh() {
-  local tool=$1 arg org method=GET query= query_seen=0 expect_value=0
+  local tool=$1 arg method=GET query= query_seen=0 expect_value=0
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -300,8 +297,7 @@ classify_gh() {
       case "$SUB" in
         list|view|clone|'') ;;
         fork)
-          org=$(fork_org "$@") || org=''
-          if [ "$org" = "$PROTECTED_OWNER" ]; then
+          if fork_org "$@"; then
             MUTATION=1
             REPO_SCOPED=1
             TARGET=$PROTECTED_OWNER/fork
