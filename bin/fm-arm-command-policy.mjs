@@ -477,7 +477,7 @@ function wordsInNode(tokens) {
 
 const WRAPPER_OPTIONS = {
   command: { noArgument: new Set(["p", "v", "V"]), takesArgument: new Set() },
-  env: { noArgument: new Set(["0", "i", "P", "v"]), takesArgument: new Set(["a", "C", "S", "u"]) },
+  env: { noArgument: new Set(["0", "i", "v"]), takesArgument: new Set(["a", "C", "P", "S", "u"]) },
   exec: { noArgument: new Set(["c", "l"]), takesArgument: new Set(["a"]) },
   nohup: { noArgument: new Set(), takesArgument: new Set() },
   sudo: { noArgument: new Set(["A", "B", "b", "E", "e", "H", "i", "K", "k", "l", "N", "n", "P", "S", "s", "v", "V"]), takesArgument: new Set(["C", "D", "g", "h", "p", "r", "R", "t", "T", "u", "U"]) },
@@ -567,6 +567,9 @@ export function commandPosition(tokens) {
       unresolvedWrapperOption ||= options.unresolved;
       wrapperPayloads.push(...options.embeddedPayloads);
       index = options.unresolved ? options.index + 1 : options.index;
+      if (name === "sudo") {
+        while (words[index] && isAssignment(words[index].value)) index += 1;
+      }
       command = words[index];
       continue;
     }

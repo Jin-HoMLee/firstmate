@@ -230,6 +230,24 @@ policy_stdin_read=$(node "$POLICY" --root "$ROOT" --command "nice -10 sh <<< 'gh
 [ "$policy_stdin_read" = allow ] || fail "primary shell policy blocked a read-only here-string after an unresolved wrapper: $policy_stdin_read"
 pass "primary shell policy classifies stdin and env -S payloads after unresolved wrapper options"
 
+for nested in \
+  "env -P /usr/bin gh pr create -R kunchenguid/dotfiles --title x" \
+  "env -P /usr/bin gh-axi pr create -R kunchenguid/dotfiles" \
+  "env -P /usr/bin git push git@github.com:kunchenguid/dotfiles.git" \
+  "sudo FOO=bar gh pr create -R kunchenguid/dotfiles --title x" \
+  "sudo FOO=bar git push git@github.com:kunchenguid/dotfiles.git"; do
+  policy_wrapper_flag=$(node "$POLICY" --root "$ROOT" --command "$nested")
+  case "$policy_wrapper_flag" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a protected write through a wrapper flag/assignment: $nested -> $policy_wrapper_flag" ;;
+  esac
+done
+policy_env_P_read=$(node "$POLICY" --root "$ROOT" --command "env -P /usr/bin gh pr view 48 -R kunchenguid/dotfiles")
+[ "$policy_env_P_read" = allow ] || fail "primary shell policy blocked a read-only env -P operation: $policy_env_P_read"
+policy_sudo_assign_read=$(node "$POLICY" --root "$ROOT" --command "sudo FOO=bar gh pr view 48 -R kunchenguid/dotfiles")
+[ "$policy_sudo_assign_read" = allow ] || fail "primary shell policy blocked a read-only sudo assignment operation: $policy_sudo_assign_read"
+pass "primary shell policy classifies env -P and sudo assignment wrapper forms"
+
 repo="$TMP_ROOT/repo"
 remote="$TMP_ROOT/remote.git"
 fm_git_init_commit "$repo"
