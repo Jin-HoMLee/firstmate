@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeShellCommands, Lexer } from "./fm-arm-command-policy.mjs";
+import { analyzeProgram, Lexer } from "./fm-arm-command-policy.mjs";
 
 const self = fileURLToPath(import.meta.url);
 const defaultRoot = resolve(dirname(self), "..");
@@ -117,7 +117,8 @@ function isDirectoryChange(position) {
 }
 
 function decision(command, root = defaultRoot) {
-  const { error, positions } = analyzeShellCommands(command);
+  const context = { root, home: root, protectedVariables: new Set(), watcherPatterns: new Set(), watcherPids: new Set() };
+  const { traversalError, positions } = analyzeProgram(command, context, 0, 64);
   for (const { position } of positions) {
     const denied = classifyPosition(position, root);
     if (denied) return denied;
@@ -134,14 +135,14 @@ function decision(command, root = defaultRoot) {
     }
     if (isDirectoryChange(position)) directoryChanged = true;
   }
-  if (error === "recursion limit") {
+  if (traversalError === "recursion limit") {
     return {
       decision: "deny",
       code: "protected-upstream-write",
       reason: "command nesting exceeds the shell analysis limit",
     };
   }
-  if (error && rawLexErrorMention(command, root)) {
+  if (traversalError && rawLexErrorMention(command, root)) {
     return {
       decision: "deny",
       code: "protected-upstream-write",

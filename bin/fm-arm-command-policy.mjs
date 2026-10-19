@@ -720,46 +720,6 @@ function shiftPastReservedWords(position) {
   };
 }
 
-export function analyzeShellCommands(command, { depthLimit = 64 } = {}) {
-  const positions = [];
-  let error = "";
-  function visit(source, depth) {
-    if (depth > depthLimit) {
-      if (!error) error = "recursion limit";
-      return;
-    }
-    const lexed = new Lexer(source).tokenize();
-    if (lexed.error) {
-      if (!error) error = lexed.error;
-      return;
-    }
-    const program = splitProgram(lexed.tokens);
-    for (const tokens of program.nodes) {
-      const raw = commandPosition(tokens);
-      const position = raw.command && SHELL_RESERVED_WORDS.has(basename(raw.command.value))
-        ? shiftPastReservedWords(raw)
-        : raw;
-      positions.push({ tokens, position });
-      for (const payload of position.wrapperPayloads) visit(payload, depth + 1);
-      for (const token of tokens) {
-        if (token.type === "group") visit(token.content, depth + 1);
-        if (token.type === "word") {
-          for (const substitution of token.subs) visit(substitution.content, depth + 1);
-        }
-      }
-      const shell = shellInvocation(position);
-      if (shell?.kind === "command" && shell.payload) visit(shell.payload.value, depth + 1);
-      const literalEval = evalPayload(position);
-      if (literalEval !== null) visit(literalEval, depth + 1);
-      for (const payload of [...shellHeredocPayloads(tokens, position), ...shellHereStringPayloads(tokens, position)]) {
-        visit(payload, depth + 1);
-      }
-    }
-  }
-  visit(command, 0);
-  return { error, positions };
-}
-
 function wordReferencesAny(word, names) {
   if (!word || names.size === 0) return false;
   for (const match of word.value.matchAll(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g)) {
@@ -820,16 +780,18 @@ function isWatcherPgrep(position, context) {
   return position.words.slice(position.index + 1).some((word) => /(?:^|\/)fm-watch(?:\.sh)?\b/.test(word.value) || wordReferencesAny(word, context.watcherPatterns));
 }
 
-function analyzeProgram(command, context, depth = 0) {
-  if (depth > 12) {
-    return { error: "recursion limit", protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
+export function analyzeProgram(command, context, depth = 0, depthLimit = 12) {
+  if (depth > depthLimit) {
+    return { error: "recursion limit", traversalError: "recursion limit", positions: [], protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
   }
   const lexed = new Lexer(command).tokenize();
   if (lexed.error) {
-    return { error: lexed.error, protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
+    return { error: lexed.error, traversalError: lexed.error, positions: [], protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
   }
   const program = splitProgram(lexed.tokens);
   const nodeInfos = [];
+  const positions = [];
+  let traversalError = "";
   let nestedProtected = false;
   let broadKill = false;
   let pgrepWatcher = false;
@@ -843,7 +805,11 @@ function analyzeProgram(command, context, depth = 0) {
   let unclassifiableProtected = false;
 
   for (const tokens of program.nodes) {
-    const position = commandPosition(tokens);
+    const rawPosition = commandPosition(tokens);
+    const position = rawPosition.command && SHELL_RESERVED_WORDS.has(basename(rawPosition.command.value))
+      ? shiftPastReservedWords(rawPosition)
+      : rawPosition;
+    positions.push({ tokens, position });
     const nodeContext = contextWithAssignments(activeContext, position.words);
     const firstName = basename(position.words[0]?.value || "");
     if (SHELL_RESERVED_WORDS.has(firstName)) {
@@ -854,27 +820,33 @@ function analyzeProgram(command, context, depth = 0) {
     let nodePgrepWatcher = false;
     const substitutionResults = new Map();
     for (const payload of position.wrapperPayloads) {
-      const nested = analyzeProgram(payload, nodeContext, depth + 1);
+      const nested = analyzeProgram(payload, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
       nodePgrepWatcher ||= nested.pgrepWatcher;
+      traversalError ||= nested.traversalError;
+      positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(payload)) unsupported = true;
     }
     for (const token of tokens) {
       if (token.type === "group") {
-        const nested = analyzeProgram(token.content, nodeContext, depth + 1);
+        const nested = analyzeProgram(token.content, nodeContext, depth + 1, depthLimit);
         nodeNestedProtected ||= nested.protectedFound;
         broadKill ||= nested.broadKill;
         nodePgrepWatcher ||= nested.pgrepWatcher;
+        traversalError ||= nested.traversalError;
+        positions.push(...nested.positions);
         if (nested.error && rawMentionsProtected(token.content)) unsupported = true;
       }
       if (token.type === "word") {
         for (const substitution of token.subs) {
-          const nested = analyzeProgram(substitution.content, nodeContext, depth + 1);
+          const nested = analyzeProgram(substitution.content, nodeContext, depth + 1, depthLimit);
           substitutionResults.set(substitution, nested);
           nodeNestedProtected ||= nested.protectedFound;
           broadKill ||= nested.broadKill;
           nodePgrepWatcher ||= nested.pgrepWatcher;
+          traversalError ||= nested.traversalError;
+          positions.push(...nested.positions);
           if (nested.error && rawMentionsProtected(substitution.content)) unsupported = true;
         }
       }
@@ -895,18 +867,22 @@ function analyzeProgram(command, context, depth = 0) {
     if (shellPayload && (!shellPayload.literal || shellPayload.subs.length > 0)) {
       if (wordReferencesAny(shellPayload, nodeContext.protectedVariables)) nodeNestedProtected = true;
     } else if (shellPayload) {
-      const nested = analyzeProgram(shellPayload.value, nodeContext, depth + 1);
+      const nested = analyzeProgram(shellPayload.value, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
       nodePgrepWatcher ||= nested.pgrepWatcher;
+      traversalError ||= nested.traversalError;
+      positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(shellPayload.value)) unsupported = true;
     }
     for (const payload of [literalEvalPayload, ...heredocPayloads, ...hereStringPayloads]) {
       if (payload === null) continue;
-      const nested = analyzeProgram(payload, nodeContext, depth + 1);
+      const nested = analyzeProgram(payload, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
       nodePgrepWatcher ||= nested.pgrepWatcher;
+      traversalError ||= nested.traversalError;
+      positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(payload)) unsupported = true;
     }
 
@@ -943,9 +919,9 @@ function analyzeProgram(command, context, depth = 0) {
   if (unclassifiableProtected) unsupported = true;
   const broadKillFound = broadKill || (unsupported && rawMentionsBroadKill(command));
   if (unsupported && (protectedFound || rawMentionsProtected(command) || broadKillFound)) {
-    return { error: "unsupported compound grammar", protectedFound: true, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
+    return { error: "unsupported compound grammar", traversalError, positions, protectedFound: true, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
   }
-  return { error: "", protectedFound, directProtected, nestedProtected, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
+  return { error: "", traversalError, positions, protectedFound, directProtected, nestedProtected, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
 }
 
 function xModePathAllowed(value, home) {

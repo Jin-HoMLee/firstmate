@@ -193,6 +193,25 @@ policy_flow_wrap_read=$(node "$POLICY" --root "$ROOT" --command 'if true; then s
 [ "$policy_flow_wrap_read" = allow ] || fail "primary shell policy blocked a read-only wrapped control-flow operation: $policy_flow_wrap_read"
 pass "primary shell policy fails closed on control-flow and deeply nested protected writes"
 
+for payload in \
+  'echo <(gh pr create -R kunchenguid/dotfiles --title x)' \
+  'f() { gh pr create -R kunchenguid/dotfiles --title x; }; f' \
+  "bash <<< 'gh pr create -R kunchenguid/dotfiles --title x'"; do
+  policy_payload=$(node "$POLICY" --root "$ROOT" --command "$payload")
+  case "$policy_payload" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a nested protected write: $payload -> $policy_payload" ;;
+  esac
+done
+policy_heredoc=$(node "$POLICY" --root "$ROOT" --command $'bash <<\'EOF\'\ngh pr create -R kunchenguid/dotfiles --title x\nEOF')
+case "$policy_heredoc" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a heredoc protected write: $policy_heredoc" ;;
+esac
+policy_proc_read=$(node "$POLICY" --root "$ROOT" --command 'echo <(gh pr view 48 -R kunchenguid/dotfiles)')
+[ "$policy_proc_read" = allow ] || fail "primary shell policy blocked a read-only process substitution: $policy_proc_read"
+pass "primary shell policy classifies nested process, function, heredoc, and herestring payloads"
+
 primary="$TMP_ROOT/plain-primary"
 mkdir -p "$primary/bin"
 printf '# Firstmate\n' >"$primary/AGENTS.md"
