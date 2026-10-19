@@ -120,6 +120,9 @@ expect_allowed gh repo gitignore list
 expect_allowed gh repo license list
 expect_allowed gh repo deploy-key list -R kunchenguid/dotfiles
 expect_allowed gh repo autolink list -R kunchenguid/dotfiles
+expect_allowed gh repo deploy-key -R kunchenguid/dotfiles list
+expect_allowed gh repo autolink -R kunchenguid/dotfiles list
+expect_allowed gh repo autolink -R kunchenguid/dotfiles view
 expect_allowed gh repo set-default kunchenguid/dotfiles
 expect_refused gh repo deploy-key add -R kunchenguid/dotfiles key
 expect_refused gh repo autolink create -R kunchenguid/dotfiles --key-prefix x --url-template y
@@ -355,5 +358,23 @@ FM_TASK_ID=worker FM_HOME="$AUTH_HOME" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/us
 assert_contains "$(cat "$TMP_ROOT/worker.err")" "workers cannot authorize" \
   "worker refusal did not name the authority boundary"
 pass "the only override is exact, audited, and unavailable to workers"
+
+: >"$LOG"
+status=0
+FM_HOME="$AUTH_HOME" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+  "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$words" -- \
+  gh issue transfer 123 kunchenguid/otherrepo -R kunchenguid/dotfiles \
+  >"$TMP_ROOT/xfer.out" 2>"$TMP_ROOT/xfer.err" || status=$?
+[ "$status" -eq 2 ] || fail "authorized transfer to an out-of-scope protected destination should be refused"
+[ "$(wc -l <"$LOG" | tr -d ' ')" = "0" ] || fail "out-of-scope transfer reached the forge stub"
+assert_contains "$(cat "$TMP_ROOT/xfer.err")" "outside the named --repo scope" \
+  "out-of-scope transfer refusal did not name the scope boundary"
+: >"$LOG"
+FM_HOME="$AUTH_HOME" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+  "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$words" -- \
+  gh issue transfer 123 kunchenguid/dotfiles -R kunchenguid/dotfiles \
+  || fail "authorized transfer within the named repo scope should run"
+assert_contains "$(cat "$LOG")" "issue transfer 123 kunchenguid/dotfiles -R kunchenguid/dotfiles" \
+  "in-scope transfer did not reach the forge stub"
 
 echo "# all fm-upstream-write-guard tests passed"

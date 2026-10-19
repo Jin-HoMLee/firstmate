@@ -152,6 +152,23 @@ issue_transfer_destination() {
   return 1
 }
 
+repo_subsubcommand() {
+  local arg expect_repo=0 positional=0
+  for arg in "$@"; do
+    if [ "$expect_repo" -eq 1 ]; then expect_repo=0; continue; fi
+    case "$arg" in
+      -R|--repo) expect_repo=1; continue ;;
+      --repo=*|-R?*) continue ;;
+      -*) continue ;;
+    esac
+    positional=$((positional + 1))
+    if [ "$positional" -le 2 ]; then continue; fi
+    printf '%s\n' "$arg"
+    return 0
+  done
+  return 1
+}
+
 TOP='' SUB='' TARGET='' TRANSFER_DEST='' MUTATION=0 REPO_SCOPED=0
 set_target() {
   local candidate normalized
@@ -221,7 +238,7 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg method=GET query= query_seen=0 expect_value=0
+  local tool=$1 arg subsub method=GET query= query_seen=0 expect_value=0
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -325,10 +342,12 @@ classify_gh() {
       case "$SUB" in
         list|view|clone|read-dir|read-file|gitignore|license|set-default|'') ;;
         deploy-key)
-          case "${3:-}" in list) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+          subsub=$(repo_subsubcommand "$@") || subsub=''
+          case "$subsub" in list) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
           ;;
         autolink)
-          case "${3:-}" in list|view) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+          subsub=$(repo_subsubcommand "$@") || subsub=''
+          case "$subsub" in list|view) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
           ;;
         fork)
           if fork_org "$@"; then
@@ -536,6 +555,9 @@ authorize() {
       classify_gh "$tool" "$@"
       [ "$MUTATION" -eq 1 ] || die "authorized command is not a repository mutation"
       [ "$TARGET" = "$normalized" ] || die "authorized command must explicitly name exact repository '$normalized'"
+      if [ -n "$TRANSFER_DEST" ] && repo_is_protected "$TRANSFER_DEST"; then
+        [ "$(normalize_repo "$TRANSFER_DEST" 2>/dev/null)" = "$normalized" ] || die "authorized command's issue-transfer destination '${TRANSFER_DEST}' is outside the named --repo scope"
+      fi
       ;;
     git)
       parse_git_push "$@" || die "authorized git command must be a push with a locally resolvable destination"
