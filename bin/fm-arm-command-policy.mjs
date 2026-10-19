@@ -566,7 +566,7 @@ export function commandPosition(tokens) {
       const options = consumeWrapperOptions(name, words, index + 1);
       unresolvedWrapperOption ||= options.unresolved;
       wrapperPayloads.push(...options.embeddedPayloads);
-      index = options.index;
+      index = options.unresolved ? options.index + 1 : options.index;
       command = words[index];
       continue;
     }
@@ -598,8 +598,8 @@ export function commandPosition(tokens) {
       }
       continue;
     }
-    if (name === "builtin") {
-      wrappers.push(name);
+    if (command.value === "builtin") {
+      wrappers.push(command.value);
       index += 1;
       command = words[index];
       continue;

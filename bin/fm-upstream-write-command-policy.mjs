@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeProgram, Lexer, shellInvocation, evalPayload } from "./fm-arm-command-policy.mjs";
+import { analyzeProgram, Lexer } from "./fm-arm-command-policy.mjs";
 
 const self = fileURLToPath(import.meta.url);
 const defaultRoot = resolve(dirname(self), "..");
@@ -32,24 +32,6 @@ function checkTool(tool, args, root) {
   return null;
 }
 
-function unresolvedNestedPayloads(position) {
-  const words = position.words.slice(position.index);
-  const payloads = [];
-  for (let i = 0; i < words.length; i += 1) {
-    const name = base(words[i].value);
-    if (name === "eval") {
-      const payload = evalPayload({ command: words[i], words: words.slice(i), index: 0 });
-      if (payload) payloads.push(payload);
-    } else if (name === "sh" || name === "bash" || name === "zsh") {
-      const invocation = shellInvocation({ command: words[i], words: words.slice(i), index: 0 });
-      if (invocation && invocation.kind === "command" && invocation.payload) {
-        payloads.push(invocation.payload.value);
-      }
-    }
-  }
-  return payloads;
-}
-
 function classifyPosition(position, root) {
   if (!position.command) return null;
   if (position.unresolvedWrapperOption) {
@@ -59,20 +41,6 @@ function classifyPosition(position, root) {
       if (!GUARD_TOOLS.has(candidate)) continue;
       const denied = checkTool(candidate, words.slice(i + 1), root);
       if (denied) return denied;
-    }
-    for (const payload of unresolvedNestedPayloads(position)) {
-      const context = { root, home: root, protectedVariables: new Set(), watcherPatterns: new Set(), watcherPids: new Set() };
-      const nested = analyzeProgram(payload, context, 0, 64);
-      for (const { position: nestedPosition } of nested.positions) {
-        const denied = classifyPosition(nestedPosition, root);
-        if (denied) return denied;
-      }
-      if (nested.traversalError === "recursion limit") {
-        return { decision: "deny", code: "protected-upstream-write", reason: "command nesting exceeds the shell analysis limit" };
-      }
-      if (nested.traversalError && rawLexErrorMention(payload, root)) {
-        return { decision: "deny", code: "protected-upstream-write", reason: "unparseable shell grammar contains a protected-upstream repository mutation" };
-      }
     }
     return null;
   }

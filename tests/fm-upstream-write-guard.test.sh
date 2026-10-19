@@ -210,6 +210,26 @@ policy_nested_shell_read=$(node "$POLICY" --root "$ROOT" --command "nice -10 sh 
 [ "$policy_nested_shell_read" = allow ] || fail "primary shell policy blocked a read-only nested shell after an unresolved wrapper: $policy_nested_shell_read"
 pass "primary shell policy classifies nested shells after unresolved wrapper options"
 
+for nested in \
+  "nice -10 sh <<< 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  "nice -10 bash <<< 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  "nice -10 sh -s <<< 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  "nice -10 env -S 'gh pr create -R kunchenguid/dotfiles --title x'"; do
+  policy_stdin_env=$(node "$POLICY" --root "$ROOT" --command "$nested")
+  case "$policy_stdin_env" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a stdin/env payload after an unresolved wrapper: $nested -> $policy_stdin_env" ;;
+  esac
+done
+policy_wrapped_heredoc=$(node "$POLICY" --root "$ROOT" --command $'nice -10 sh <<\'EOF\'\ngh pr create -R kunchenguid/dotfiles --title x\nEOF')
+case "$policy_wrapped_heredoc" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a heredoc after an unresolved wrapper: $policy_wrapped_heredoc" ;;
+esac
+policy_stdin_read=$(node "$POLICY" --root "$ROOT" --command "nice -10 sh <<< 'gh pr view 48 -R kunchenguid/dotfiles'")
+[ "$policy_stdin_read" = allow ] || fail "primary shell policy blocked a read-only here-string after an unresolved wrapper: $policy_stdin_read"
+pass "primary shell policy classifies stdin and env -S payloads after unresolved wrapper options"
+
 repo="$TMP_ROOT/repo"
 remote="$TMP_ROOT/remote.git"
 fm_git_init_commit "$repo"
