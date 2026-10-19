@@ -314,6 +314,9 @@ classify_gh() {
     api)
       [ -n "$TARGET" ] && REPO_SCOPED=1
       for arg in "$@"; do
+        case "$(lower "$arg")" in
+          /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
+        esac
         case "$arg" in
           -X|--method) method=EXPECT ;;
           -X=*|--method=*) method=${arg#*=} ;;
@@ -411,8 +414,15 @@ check_gh() {
 }
 
 GIT_REPO_DIR='' GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
+config_env_names_destination() {
+  case "${1%%=*}" in
+    remote.pushDefault|branch.*.remote|branch.*.pushRemote|remote.*.url|remote.*.pushurl) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 parse_git_push() {
-  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 candidates url target
+  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 candidates url target
   local -a c_overrides=()
   GIT_REPO_DIR=$PWD
   GIT_REMOTE=
@@ -425,11 +435,18 @@ parse_git_push() {
       expect_c_override=0
       continue
     fi
+    if [ "$expect_config_env" -eq 1 ]; then
+      config_env_names_destination "$arg" && config_env_dest=1
+      expect_config_env=0
+      continue
+    fi
     if [ "$after_push" -eq 0 ]; then
       case "$arg" in
         -C) expect_c=1 ;;
         -C?*) GIT_REPO_DIR=${arg#-C} ;;
         -c) expect_c_override=1 ;;
+        --config-env) expect_config_env=1 ;;
+        --config-env=*) config_env_names_destination "${arg#--config-env=}" && config_env_dest=1 ;;
         push) after_push=1 ;;
       esac
       continue
@@ -447,6 +464,7 @@ parse_git_push() {
     esac
   done
   [ "$after_push" -eq 1 ] || return 1
+  [ "$config_env_dest" -eq 0 ] || return 3
   if [ -z "$GIT_REMOTE" ]; then
     GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".pushRemote 2>/dev/null || true)
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
@@ -484,6 +502,7 @@ check_git() {
   case $? in
     1) return 0 ;;
     2) refuse_reason "cannot resolve git push destination '$GIT_REMOTE' locally; refusing before network access"; return 2 ;;
+    3) refuse_reason "git push destination is overridden via --config-env from an environment variable and cannot be verified locally; refusing before network access"; return 2 ;;
   esac
   if [ -n "$GIT_TARGET" ] && repo_is_protected "$GIT_TARGET"; then
     refuse_reason "git push to protected upstream '$GIT_TARGET' requires the exact captain-authorized interface"

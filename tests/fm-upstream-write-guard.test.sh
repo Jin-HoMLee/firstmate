@@ -57,6 +57,12 @@ expect_allowed gh api -X PUT /user
 expect_allowed gh api -X POST /gists
 pass "non-repository gh api mutations remain available"
 
+expect_refused gh api 'repos/{owner}/{repo}/issues' -f title=x
+expect_allowed gh api 'repos/{owner}/{repo}/issues'
+expect_refused gh api repos/kunchenguid/dotfiles/issues -f title=x
+expect_allowed gh api repos/kunchenguid/dotfiles/issues
+pass "gh api repo-path mutations refuse when {owner}/{repo} placeholders hide the target"
+
 expect_refused gh-axi pr create --title accidental
 expect_refused gh pr create --title accidental
 assert_contains "$(cat "$TMP_ROOT/err")" "must name its exact repository" \
@@ -182,6 +188,12 @@ esac
 policy_read_dir=$(node "$POLICY" --root "$ROOT" --command 'gh repo read-dir kunchenguid/dotfiles')
 [ "$policy_read_dir" = allow ] || fail "primary shell policy blocked a read-only repo read-dir: $policy_read_dir"
 
+policy_api_placeholder=$(node "$POLICY" --root "$ROOT" --command "gh api 'repos/{owner}/{repo}/issues' -f title=x")
+case "$policy_api_placeholder" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a protected gh api placeholder mutation: $policy_api_placeholder" ;;
+esac
+
 policy_nice_unresolved=$(node "$POLICY" --root "$ROOT" --command 'nice -10 gh pr create -R kunchenguid/dotfiles --title x')
 case "$policy_nice_unresolved" in
   deny*) ;;
@@ -291,6 +303,18 @@ status=0
 "$GUARD" check git -C "$repo" push origin \
   || fail "git push to a local remote without -c should be allowed"
 pass "git -c config overrides are honored when resolving the push destination"
+
+status=0
+MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env=remote.origin.url=MYURL push origin main:main \
+  >"$TMP_ROOT/gitce1.out" 2>"$TMP_ROOT/gitce1.err" || status=$?
+[ "$status" -eq 2 ] || fail "git --config-env remote.origin.url override should be refused, got $status"
+status=0
+MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env remote.origin.url=MYURL push origin main:main \
+  >"$TMP_ROOT/gitce2.out" 2>"$TMP_ROOT/gitce2.err" || status=$?
+[ "$status" -eq 2 ] || fail "git --config-env two-arg remote.origin.url override should be refused, got $status"
+MYNAME=test "$GUARD" check git -C "$repo" --config-env=user.name=MYNAME push origin main:main \
+  || fail "git --config-env for a non-destination key should be allowed"
+pass "git --config-env push-destination overrides are refused when unresolvable"
 
 for ssh_url in \
   ssh://git@ssh.github.com:443/kunchenguid/dotfiles.git \
