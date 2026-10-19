@@ -98,6 +98,11 @@ expect_allowed gh repo create myrepo --source https://github.com/kunchenguid/dot
 expect_allowed gh repo create myrepo --template https://github.com/kunchenguid/dotfiles
 pass "gh repo edit skips homepage/branch flag values when locating its destination"
 
+expect_allowed gh repo edit --template myorg/myrepo
+expect_allowed gh repo edit myorg/myrepo --template
+expect_refused gh repo edit --template kunchenguid/dotfiles
+pass "gh repo edit treats --template as a boolean, not a destination value"
+
 expect_allowed gh repo fork kunchenguid/dotfiles
 expect_allowed gh repo fork Jin-HoMLee/dotfiles
 expect_refused gh repo fork kunchenguid/dotfiles --org kunchenguid --fork-name newname
@@ -137,6 +142,8 @@ case "$policy_fork_dup_org" in
   deny*) ;;
   *) fail "primary shell policy allowed a protected-org fork with a duplicate org flag: $policy_fork_dup_org" ;;
 esac
+policy_repo_edit_template=$(node "$POLICY" --root "$ROOT" --command 'gh repo edit --template myorg/myrepo')
+[ "$policy_repo_edit_template" = allow ] || fail "primary shell policy blocked a repo edit with a boolean --template: $policy_repo_edit_template"
 policy_agent_task=$(node "$POLICY" --root "$ROOT" --command 'gh agent-task create -R kunchenguid/dotfiles x')
 case "$policy_agent_task" in
   deny*) ;;

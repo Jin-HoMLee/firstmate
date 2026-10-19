@@ -103,21 +103,30 @@ fork_org() {
 }
 
 repo_destination() {
-  local arg expect_flag_value=0
+  local sub=$1 arg expect_flag_value=0
+  shift
   for arg in "$@"; do
     if [ "$expect_flag_value" -eq 1 ]; then
       expect_flag_value=0
       continue
     fi
+    case "$sub" in
+      create|view)
+        case "$arg" in
+          -t|--template) expect_flag_value=1; continue ;;
+          --template=*|-t?*) continue ;;
+        esac
+        ;;
+    esac
     case "$arg" in
-      -b|--branch|-q|--jq|-t|--template|-d|--description|-h|--homepage|-s|--source|-R|--repo|-g|--gitignore|-l|--license|-r|--remote|-p|--team|--json|--fork-name|--org|--remote-name|--default-branch|--add-topic|--remove-topic|--squash-merge-commit-message|--visibility)
+      -b|--branch|-q|--jq|-d|--description|-h|--homepage|-s|--source|-R|--repo|-g|--gitignore|-l|--license|-r|--remote|-p|--team|--json|--fork-name|--org|--remote-name|--default-branch|--add-topic|--remove-topic|--squash-merge-commit-message|--visibility)
         expect_flag_value=1
         continue
         ;;
-      --branch=*|--jq=*|--template=*|--description=*|--homepage=*|--source=*|--repo=*|--gitignore=*|--license=*|--remote=*|--team=*|--json=*|--fork-name=*|--org=*|--remote-name=*|--default-branch=*|--add-topic=*|--remove-topic=*|--squash-merge-commit-message=*|--visibility=*)
+      --branch=*|--jq=*|--description=*|--homepage=*|--source=*|--repo=*|--gitignore=*|--license=*|--remote=*|--team=*|--json=*|--fork-name=*|--org=*|--remote-name=*|--default-branch=*|--add-topic=*|--remove-topic=*|--squash-merge-commit-message=*|--visibility=*)
         continue
         ;;
-      -b?*|-q?*|-t?*|-d?*|-h?*|-s?*|-R?*|-g?*|-l?*|-r?*|-p?*)
+      -b?*|-q?*|-d?*|-h?*|-s?*|-R?*|-g?*|-l?*|-r?*|-p?*)
         continue
         ;;
     esac
@@ -186,7 +195,7 @@ parse_top_sub_and_target() {
 
   if [ "$TOP" = repo ]; then
     case "$SUB" in
-      view|fork|edit|archive|delete|rename|sync|create) repo_destination "$@" ;;
+      view|fork|edit|archive|delete|rename|sync|create) repo_destination "$SUB" "$@" ;;
     esac
   fi
   : "$tool" "$previous"
