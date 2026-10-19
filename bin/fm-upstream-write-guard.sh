@@ -160,14 +160,29 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg method=GET query= query_seen=0
+  local tool=$1 arg method=GET query= query_seen=0 expect_value=0
   shift
   MUTATION=0
   REPO_SCOPED=0
   parse_top_sub_and_target "$tool" "$@"
 
   for arg in "$@"; do
-    case "$arg" in -h|--help|-v|-V|--version) return 0 ;; esac
+    if [ "$expect_value" -eq 1 ]; then
+      expect_value=0
+      continue
+    fi
+    case "$arg" in
+      -h|--help|-v|-V|--version) return 0 ;;
+      --) break ;;
+      -*)
+        case "$arg" in
+          *=*) ;;
+          --*) expect_value=1 ;;
+          -?) expect_value=1 ;;
+          -??*) ;;
+        esac
+        ;;
+    esac
   done
   [ -n "$TOP" ] || return 0
 
@@ -179,6 +194,10 @@ classify_gh() {
     issue)
       REPO_SCOPED=1
       case "$SUB" in list|view|status) ;; subissue) [ "${3:-}" = list ] || MUTATION=1 ;; *) MUTATION=1 ;; esac
+      ;;
+    discussion)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
       ;;
     run)
       REPO_SCOPED=1
