@@ -47,7 +47,7 @@ normalize_repo() {
   value=${value%/}
   value=${value%.git}
   case "$(lower "$value")" in
-    https://*|http://*|ssh://*|git://*)
+    https://*|http://*|ssh://*|git://*|git+ssh://*|ssh+git://*)
       host=${value#*://}
       host=${host#*@}
       path=${host#*/}
@@ -62,7 +62,7 @@ normalize_repo() {
   esac
   lower_value=$(lower "$value")
   case "$lower_value" in
-    git@github.com:*|git@ssh.github.com:*) value=${value#*:} ;;
+    git@github.com:*|git@ssh.github.com:*|github.com:*|ssh.github.com:*) value=${value#*:} ;;
     github.com/*|ssh.github.com/*) value=${value#*/} ;;
   esac
   value=${value#repos/}
@@ -215,6 +215,10 @@ classify_gh() {
       REPO_SCOPED=1
       [ "$SUB" = list ] || MUTATION=1
       ;;
+    ruleset)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
+      ;;
     secret|variable)
       REPO_SCOPED=1
       [ "$SUB" = list ] || MUTATION=1
@@ -225,11 +229,13 @@ classify_gh() {
         case "$arg" in
           -X|--method) method=EXPECT ;;
           -X=*|--method=*) method=${arg#*=} ;;
+          -X?*) method=${arg#-X} ;;
           GET|POST|PUT|PATCH|DELETE|HEAD)
             if [ "$method" = EXPECT ] || [ "$arg" = "$SUB" ]; then method=$arg; fi
             ;;
           -f|--field|-F|--raw-field|--input) [ "$method" = GET ] && method=POST ;;
           -f=*|--field=*|-F=*|--raw-field=*|--input=*) [ "$method" = GET ] && method=POST ;;
+          -f?*|-F?*) [ "$method" = GET ] && method=POST ;;
           query=*) query=${arg#query=}; case "$query" in @*) query_seen=0 ;; *) query_seen=1 ;; esac ;;
         esac
       done
@@ -257,7 +263,7 @@ classify_gh() {
       REPO_SCOPED=1
       [ "$SUB" = delete ] && MUTATION=1
       ;;
-    search|status|browse|ruleset|attestation|help|completion|auth|config|alias|extension|ssh-key|gpg-key|org|gist|project|codespace|setup)
+    search|status|browse|attestation|help|completion|auth|config|alias|extension|ssh-key|gpg-key|org|gist|project|codespace|setup)
       ;;
     *)
       # Unknown official/extension commands are not assumed to mutate a repo.
