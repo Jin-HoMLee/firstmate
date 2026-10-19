@@ -250,7 +250,7 @@ classify_gh() {
       continue
     fi
     case "$arg" in
-      --help|-v|-V|--version) return 0 ;;
+      --help|--version) return 0 ;;
       -h)
         case "$TOP/$SUB" in
           repo/create|repo/edit) expect_value=1 ;;
@@ -412,17 +412,24 @@ check_gh() {
 
 GIT_REPO_DIR='' GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
 parse_git_push() {
-  local arg after_push=0 expect_c=0 expect_repo=0
+  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 candidates url target
+  local -a c_overrides=()
   GIT_REPO_DIR=$PWD
   GIT_REMOTE=
   GIT_REMOTE_URL=
   GIT_TARGET=
   for arg in "$@"; do
     if [ "$expect_c" -eq 1 ]; then GIT_REPO_DIR=$arg; expect_c=0; continue; fi
+    if [ "$expect_c_override" -eq 1 ]; then
+      c_overrides+=( -c "$arg" )
+      expect_c_override=0
+      continue
+    fi
     if [ "$after_push" -eq 0 ]; then
       case "$arg" in
         -C) expect_c=1 ;;
         -C?*) GIT_REPO_DIR=${arg#-C} ;;
+        -c) expect_c_override=1 ;;
         push) after_push=1 ;;
       esac
       continue
@@ -441,16 +448,33 @@ parse_git_push() {
   done
   [ "$after_push" -eq 1 ] || return 1
   if [ -z "$GIT_REMOTE" ]; then
-    GIT_REMOTE=$(git -C "$GIT_REPO_DIR" config --get remote.pushDefault 2>/dev/null || true)
-    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".remote 2>/dev/null || true)
+    GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
+    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".remote 2>/dev/null || true)
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=origin
   fi
   case "$GIT_REMOTE" in
-    *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*) GIT_REMOTE_URL=$GIT_REMOTE ;;
-    *) GIT_REMOTE_URL=$(git -C "$GIT_REPO_DIR" remote get-url --push "$GIT_REMOTE" 2>/dev/null || true) ;;
+    *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*)
+      candidates=$GIT_REMOTE
+      ;;
+    *)
+      candidates=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-all remote."$GIT_REMOTE".pushurl 2>/dev/null || true)
+      [ -n "$candidates" ] || candidates=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-all remote."$GIT_REMOTE".url 2>/dev/null || true)
+      ;;
   esac
-  [ -n "$GIT_REMOTE_URL" ] || return 2
-  GIT_TARGET=$(normalize_repo "$GIT_REMOTE_URL" 2>/dev/null || true)
+  [ -n "$candidates" ] || return 2
+  GIT_REMOTE_URL=
+  GIT_TARGET=
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    [ -n "$GIT_REMOTE_URL" ] || GIT_REMOTE_URL=$url
+    target=$(normalize_repo "$url" 2>/dev/null || true)
+    [ -n "$target" ] || continue
+    [ -n "$GIT_TARGET" ] || GIT_TARGET=$target
+    if repo_is_protected "$target"; then
+      GIT_TARGET=$target
+      break
+    fi
+  done <<< "$candidates"
   return 0
 }
 

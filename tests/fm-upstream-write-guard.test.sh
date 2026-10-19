@@ -70,6 +70,12 @@ expect_allowed gh-axi pr create -R Jin-HoMLee/dotfiles --title intended
 expect_allowed gh pr create --repo Jin-HoMLee/dotfiles --title intended
 pass "both GitHub CLIs block protected writes and allow an explicit personal fork"
 
+expect_refused gh secret set -v private NAME -R kunchenguid/dotfiles
+expect_refused gh variable set -v selected NAME -R kunchenguid/dotfiles
+expect_allowed gh secret set -v private NAME -R Jin-HoMLee/dotfiles
+expect_allowed gh variable set -v selected NAME -R Jin-HoMLee/dotfiles
+pass "gh secret/variable set parse -v as --visibility, not a help/version early-return"
+
 expect_allowed gh repo create myrepo
 expect_allowed gh repo create myorg/myrepo
 expect_refused gh repo create kunchenguid/newrepo
@@ -176,6 +182,20 @@ esac
 policy_read_dir=$(node "$POLICY" --root "$ROOT" --command 'gh repo read-dir kunchenguid/dotfiles')
 [ "$policy_read_dir" = allow ] || fail "primary shell policy blocked a read-only repo read-dir: $policy_read_dir"
 
+policy_nice_unresolved=$(node "$POLICY" --root "$ROOT" --command 'nice -10 gh pr create -R kunchenguid/dotfiles --title x')
+case "$policy_nice_unresolved" in
+  deny*) ;;
+  *) fail "primary shell policy allowed an unresolved nice wrapper around a protected write: $policy_nice_unresolved" ;;
+esac
+policy_nice_resolved=$(node "$POLICY" --root "$ROOT" --command 'nice -n 5 gh pr create -R kunchenguid/dotfiles --title x')
+case "$policy_nice_resolved" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a resolved nice wrapper around a protected write: $policy_nice_resolved" ;;
+esac
+policy_nice_read=$(node "$POLICY" --root "$ROOT" --command 'nice -10 gh pr view 48 -R kunchenguid/dotfiles')
+[ "$policy_nice_read" = allow ] || fail "primary shell policy blocked a read-only unresolved nice wrapper: $policy_nice_read"
+pass "primary shell policy fails closed on unresolved wrapper options around guarded tools"
+
 repo="$TMP_ROOT/repo"
 remote="$TMP_ROOT/remote.git"
 fm_git_init_commit "$repo"
@@ -187,6 +207,24 @@ status=0
 [ "$status" -eq 2 ] || fail "protected git push should be refused locally"
 [ ! -e "$remote/refs/heads/test" ] || fail "protected push unexpectedly changed the local bare remote"
 pass "git push destination classification blocks the protected remote without network access"
+
+status=0
+"$GUARD" check git -C "$repo" -c remote.pushDefault=git@github.com:kunchenguid/dotfiles.git push \
+  >"$TMP_ROOT/gitc1.out" 2>"$TMP_ROOT/gitc1.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c remote.pushDefault override to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c remote.origin.pushurl=git@github.com:kunchenguid/dotfiles.git push origin \
+  >"$TMP_ROOT/gitc2.out" 2>"$TMP_ROOT/gitc2.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c remote.origin.pushurl override to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c remote.origin.url=git@github.com:kunchenguid/dotfiles.git push origin \
+  >"$TMP_ROOT/gitc3.out" 2>"$TMP_ROOT/gitc3.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c remote.origin.url override to a protected remote should be refused, got $status"
+"$GUARD" check git -C "$repo" -c remote.pushDefault=origin push \
+  || fail "git -c remote.pushDefault override to a local remote should be allowed"
+"$GUARD" check git -C "$repo" push origin \
+  || fail "git push to a local remote without -c should be allowed"
+pass "git -c config overrides are honored when resolving the push destination"
 
 for ssh_url in \
   ssh://git@ssh.github.com:443/kunchenguid/dotfiles.git \

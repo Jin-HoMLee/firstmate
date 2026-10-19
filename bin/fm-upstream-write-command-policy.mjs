@@ -33,7 +33,17 @@ function checkTool(tool, args, root) {
 }
 
 function classifyPosition(position, root) {
-  if (!position.command || position.unresolvedWrapperOption) return null;
+  if (!position.command) return null;
+  if (position.unresolvedWrapperOption) {
+    const words = position.words.slice(position.index).map((word) => word.value);
+    for (let i = 0; i < words.length; i += 1) {
+      const candidate = base(words[i] || "");
+      if (!GUARD_TOOLS.has(candidate)) continue;
+      const denied = checkTool(candidate, words.slice(i + 1), root);
+      if (denied) return denied;
+    }
+    return null;
+  }
   const tool = base(position.command.value);
   if (!GUARD_TOOLS.has(tool)) return null;
   const args = position.words.slice(position.index + 1).map((word) => word.value);
