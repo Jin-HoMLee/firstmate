@@ -86,6 +86,22 @@ repo_is_protected() {
   [ "${repo%%/*}" = "$PROTECTED_OWNER" ]
 }
 
+fork_org() {
+  local arg expect_org=0
+  for arg in "$@"; do
+    if [ "$expect_org" -eq 1 ]; then
+      expect_org=0
+      printf '%s\n' "$(lower "$arg")"
+      return 0
+    fi
+    case "$arg" in
+      --org) expect_org=1 ;;
+      --org=*) printf '%s\n' "$(lower "${arg#--org=}")"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
 TOP='' SUB='' TARGET='' MUTATION=0 REPO_SCOPED=0
 set_target() {
   local candidate normalized
@@ -180,7 +196,7 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg method=GET query= query_seen=0 expect_value=0
+  local tool=$1 arg org method=GET query= query_seen=0 expect_value=0
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -192,7 +208,13 @@ classify_gh() {
       continue
     fi
     case "$arg" in
-      -h|--help|-v|-V|--version) return 0 ;;
+      --help|-v|-V|--version) return 0 ;;
+      -h)
+        case "$TOP/$SUB" in
+          repo/create|repo/edit) expect_value=1 ;;
+          *) return 0 ;;
+        esac
+        ;;
       --) break ;;
       -*)
         case "$arg" in
@@ -276,7 +298,15 @@ classify_gh() {
       ;;
     repo)
       case "$SUB" in
-        list|view|clone|fork|'') ;;
+        list|view|clone|'') ;;
+        fork)
+          org=$(fork_org "$@") || org=''
+          if [ "$org" = "$PROTECTED_OWNER" ]; then
+            MUTATION=1
+            REPO_SCOPED=1
+            TARGET=$PROTECTED_OWNER/fork
+          fi
+          ;;
         create) MUTATION=1; [ -n "$TARGET" ] && REPO_SCOPED=1 ;;
         *) MUTATION=1; REPO_SCOPED=1 ;;
       esac

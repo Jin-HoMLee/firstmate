@@ -689,7 +689,7 @@ function sourcedScript(position) {
 export function evalPayload(position) {
   if (!position.command || basename(position.command.value) !== "eval") return null;
   const payloads = position.words.slice(position.index + 1);
-  if (payloads.length === 0 || payloads.some((payload) => !payload.literal || payload.subs.length > 0)) return null;
+  if (payloads.length === 0) return null;
   return payloads.map((payload) => payload.value).join(" ");
 }
 
@@ -856,7 +856,7 @@ export function analyzeProgram(command, context, depth = 0, depthLimit = 12) {
     const shellPayload = shell?.kind === "command" ? shell.payload : null;
     const shellScript = shell?.kind === "script" ? shell.payload : shell?.operand || null;
     const sourceScript = sourcedScript(position);
-    const literalEvalPayload = evalPayload(position);
+    const evalPayloadValue = evalPayload(position);
     const heredocPayloads = shellHeredocPayloads(tokens, position);
     const hereStringPayloads = shellHereStringPayloads(tokens, position);
     for (const script of [shellScript, sourceScript]) {
@@ -874,7 +874,7 @@ export function analyzeProgram(command, context, depth = 0, depthLimit = 12) {
       positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(shellPayload.value)) unsupported = true;
     }
-    for (const payload of [literalEvalPayload, ...heredocPayloads, ...hereStringPayloads]) {
+    for (const payload of [evalPayloadValue, ...heredocPayloads, ...hereStringPayloads]) {
       if (payload === null) continue;
       const nested = analyzeProgram(payload, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;

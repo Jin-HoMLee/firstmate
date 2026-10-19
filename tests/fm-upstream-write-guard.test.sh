@@ -82,9 +82,21 @@ expect_allowed gh repo create myorg/myrepo --source kunchenguid/dotfiles
 expect_refused gh repo create kunchenguid/newrepo --source Jin-HoMLee/dotfiles
 pass "gh repo create keeps protected --source/--template inputs distinct from its destination"
 
+expect_refused gh repo create kunchenguid/newrepo -h https://example.com
+expect_refused gh repo create -h https://example.com kunchenguid/newrepo
+expect_refused gh repo edit kunchenguid/dotfiles -h https://example.com
+expect_allowed gh repo create myrepo -h https://example.com
+expect_allowed gh repo create --help
+expect_allowed gh repo edit --help
+pass "gh repo create/edit parse -h as --homepage, not help, while --help stays allowed"
+
 expect_allowed gh repo fork kunchenguid/dotfiles
 expect_allowed gh repo fork Jin-HoMLee/dotfiles
-pass "gh repo fork reads protected sources without being blocked as a write"
+expect_refused gh repo fork kunchenguid/dotfiles --org kunchenguid --fork-name newname
+expect_refused gh repo fork someuser/somerepo --org kunchenguid
+expect_refused gh repo fork someuser/somerepo --org=kunchenguid
+expect_allowed gh repo fork kunchenguid/dotfiles --org otherorg
+pass "gh repo fork allows protected-source reads but refuses a protected-org destination"
 
 for agent_alias in agent-task agent-tasks agent agents; do
   expect_refused gh "$agent_alias" create -R kunchenguid/dotfiles x
@@ -222,7 +234,9 @@ pass "primary shell policy fails closed on control-flow and deeply nested protec
 for payload in \
   'echo <(gh pr create -R kunchenguid/dotfiles --title x)' \
   'f() { gh pr create -R kunchenguid/dotfiles --title x; }; f' \
-  "bash <<< 'gh pr create -R kunchenguid/dotfiles --title x'"; do
+  "bash <<< 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  'eval "gh pr create -R kunchenguid/dotfiles --title x"' \
+  'eval "gh pr create -R kunchenguid/dotfiles --title $x"'; do
   policy_payload=$(node "$POLICY" --root "$ROOT" --command "$payload")
   case "$policy_payload" in
     deny*) ;;
@@ -236,7 +250,9 @@ case "$policy_heredoc" in
 esac
 policy_proc_read=$(node "$POLICY" --root "$ROOT" --command 'echo <(gh pr view 48 -R kunchenguid/dotfiles)')
 [ "$policy_proc_read" = allow ] || fail "primary shell policy blocked a read-only process substitution: $policy_proc_read"
-pass "primary shell policy classifies nested process, function, heredoc, and herestring payloads"
+policy_eval_read=$(node "$POLICY" --root "$ROOT" --command 'eval "gh pr view 48 -R kunchenguid/dotfiles"')
+[ "$policy_eval_read" = allow ] || fail "primary shell policy blocked a read-only eval: $policy_eval_read"
+pass "primary shell policy classifies nested process, function, heredoc, herestring, and eval payloads"
 
 primary="$TMP_ROOT/plain-primary"
 mkdir -p "$primary/bin"
