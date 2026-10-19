@@ -26,6 +26,7 @@
 # rely on fork-aware default resolution: gh may select a fork's parent even
 # when origin is the personal fork. Read-only commands stay available with or
 # without a selector.
+# Note: git push --no-verify skips the pre-push check and is an accepted, deliberate-action-only residual.
 set -u
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P) || exit 1
@@ -210,7 +211,7 @@ classify_gh() {
             ;;
           -f|--field|-F|--raw-field|--input) [ "$method" = GET ] && method=POST ;;
           -f=*|--field=*|-F=*|--raw-field=*|--input=*) [ "$method" = GET ] && method=POST ;;
-          query=*) query=${arg#query=}; query_seen=1 ;;
+          query=*) query=${arg#query=}; case "$query" in @*) query_seen=0 ;; *) query_seen=1 ;; esac ;;
         esac
       done
       method=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
@@ -275,7 +276,7 @@ check_gh() {
 
 GIT_REPO_DIR='' GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
 parse_git_push() {
-  local arg after_push=0 expect_c=0
+  local arg after_push=0 expect_c=0 expect_repo=0
   GIT_REPO_DIR=$PWD
   GIT_REMOTE=
   GIT_REMOTE_URL=
@@ -290,7 +291,14 @@ parse_git_push() {
       esac
       continue
     fi
+    if [ "$expect_repo" -eq 1 ]; then
+      GIT_REMOTE=$arg
+      expect_repo=0
+      break
+    fi
     case "$arg" in
+      --repo=*) GIT_REMOTE=${arg#--repo=}; break ;;
+      --repo) expect_repo=1 ;;
       -*) ;;
       *) GIT_REMOTE=$arg; break ;;
     esac

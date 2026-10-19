@@ -64,6 +64,7 @@ function gitPushInfo(position) {
   let afterPush = false;
   let expectC = false;
   let hasC = false;
+  let expectRepo = false;
   let remote = "";
   for (const arg of args) {
     if (expectC) {
@@ -75,6 +76,19 @@ function gitPushInfo(position) {
       if (arg === "-C") expectC = true;
       else if (arg.length > 2 && arg.startsWith("-C")) hasC = true;
       else if (arg === "push") afterPush = true;
+      continue;
+    }
+    if (expectRepo) {
+      remote = arg;
+      expectRepo = false;
+      break;
+    }
+    if (arg.startsWith("--repo=")) {
+      remote = arg.slice("--repo=".length);
+      break;
+    }
+    if (arg === "--repo") {
+      expectRepo = true;
       continue;
     }
     if (arg.startsWith("-")) continue;
