@@ -150,8 +150,28 @@ parse_top_sub_and_target() {
         done
         ;;
       create)
+        local expect_flag_value=0
         for arg in "$@"; do
-          case "$arg" in */*) set_target "$arg" repo-positional; break ;; esac
+          if [ "$expect_flag_value" -eq 1 ]; then
+            expect_flag_value=0
+            continue
+          fi
+          case "$arg" in
+            -d|--description|-g|--gitignore|-h|--homepage|-l|--license|-r|--remote|-s|--source|-t|--team|-p|--template)
+              expect_flag_value=1
+              continue
+              ;;
+            --description=*|--gitignore=*|--homepage=*|--license=*|--remote=*|--source=*|--team=*|--template=*)
+              continue
+              ;;
+            -d?*|-g?*|-h?*|-l?*|-r?*|-s?*|-t?*|-p?*)
+              continue
+              ;;
+          esac
+          case "$arg" in
+            -*) continue ;;
+            */*) set_target "$arg" repo-positional; break ;;
+          esac
         done
         ;;
     esac
@@ -194,6 +214,10 @@ classify_gh() {
     issue)
       REPO_SCOPED=1
       case "$SUB" in list|view|status) ;; subissue) [ "${3:-}" = list ] || MUTATION=1 ;; *) MUTATION=1 ;; esac
+      ;;
+    agent-task|agent|agent-tasks|agents)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
       ;;
     discussion)
       REPO_SCOPED=1
@@ -252,7 +276,7 @@ classify_gh() {
       ;;
     repo)
       case "$SUB" in
-        list|view|clone|'') ;;
+        list|view|clone|fork|'') ;;
         create) MUTATION=1; [ -n "$TARGET" ] && REPO_SCOPED=1 ;;
         *) MUTATION=1; REPO_SCOPED=1 ;;
       esac

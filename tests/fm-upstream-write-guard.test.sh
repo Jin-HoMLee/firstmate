@@ -74,7 +74,24 @@ expect_allowed gh repo create myrepo
 expect_allowed gh repo create myorg/myrepo
 expect_refused gh repo create kunchenguid/newrepo
 expect_refused gh repo create KUNCHENGUID/newrepo
-pass "gh repo create allows own-account creation and blocks protected owners"
+expect_allowed gh repo create myrepo --source kunchenguid/dotfiles
+expect_allowed gh repo create myrepo --template kunchenguid/dotfiles
+expect_allowed gh repo create myrepo --source=kunchenguid/dotfiles
+expect_allowed gh repo create myrepo -s kunchenguid/dotfiles
+expect_allowed gh repo create myorg/myrepo --source kunchenguid/dotfiles
+expect_refused gh repo create kunchenguid/newrepo --source Jin-HoMLee/dotfiles
+pass "gh repo create keeps protected --source/--template inputs distinct from its destination"
+
+expect_allowed gh repo fork kunchenguid/dotfiles
+expect_allowed gh repo fork Jin-HoMLee/dotfiles
+pass "gh repo fork reads protected sources without being blocked as a write"
+
+for agent_alias in agent-task agent-tasks agent agents; do
+  expect_refused gh "$agent_alias" create -R kunchenguid/dotfiles x
+  expect_allowed gh "$agent_alias" create -R Jin-HoMLee/dotfiles x
+  expect_allowed gh "$agent_alias" list -R kunchenguid/dotfiles
+done
+pass "gh agent-task create is blocked at protected upstreams across every alias"
 
 policy_repo_own=$(node "$POLICY" --root "$ROOT" --command 'gh repo create myrepo')
 [ "$policy_repo_own" = allow ] || fail "primary shell policy blocked own-account repo creation: $policy_repo_own"
@@ -82,6 +99,15 @@ policy_repo_protected=$(node "$POLICY" --root "$ROOT" --command 'gh repo create 
 case "$policy_repo_protected" in
   deny*) ;;
   *) fail "primary shell policy allowed a protected repo creation: $policy_repo_protected" ;;
+esac
+policy_create_source=$(node "$POLICY" --root "$ROOT" --command 'gh repo create myrepo --source kunchenguid/dotfiles')
+[ "$policy_create_source" = allow ] || fail "primary shell policy blocked own-account creation from a protected source: $policy_create_source"
+policy_fork=$(node "$POLICY" --root "$ROOT" --command 'gh repo fork kunchenguid/dotfiles')
+[ "$policy_fork" = allow ] || fail "primary shell policy blocked a protected-source fork: $policy_fork"
+policy_agent_task=$(node "$POLICY" --root "$ROOT" --command 'gh agent-task create -R kunchenguid/dotfiles x')
+case "$policy_agent_task" in
+  deny*) ;;
+  *) fail "primary shell policy allowed an agent-task protected write: $policy_agent_task" ;;
 esac
 
 repo="$TMP_ROOT/repo"
