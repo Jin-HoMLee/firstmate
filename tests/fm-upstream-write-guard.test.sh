@@ -196,6 +196,20 @@ policy_nice_read=$(node "$POLICY" --root "$ROOT" --command 'nice -10 gh pr view 
 [ "$policy_nice_read" = allow ] || fail "primary shell policy blocked a read-only unresolved nice wrapper: $policy_nice_read"
 pass "primary shell policy fails closed on unresolved wrapper options around guarded tools"
 
+for nested in \
+  "nice -10 sh -c 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  "nice -10 bash -c 'gh pr create -R kunchenguid/dotfiles --title x'" \
+  "nice -10 eval 'gh pr create -R kunchenguid/dotfiles --title x'"; do
+  policy_nested_shell=$(node "$POLICY" --root "$ROOT" --command "$nested")
+  case "$policy_nested_shell" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a nested shell after an unresolved wrapper: $nested -> $policy_nested_shell" ;;
+  esac
+done
+policy_nested_shell_read=$(node "$POLICY" --root "$ROOT" --command "nice -10 sh -c 'gh pr view 48 -R kunchenguid/dotfiles'")
+[ "$policy_nested_shell_read" = allow ] || fail "primary shell policy blocked a read-only nested shell after an unresolved wrapper: $policy_nested_shell_read"
+pass "primary shell policy classifies nested shells after unresolved wrapper options"
+
 repo="$TMP_ROOT/repo"
 remote="$TMP_ROOT/remote.git"
 fm_git_init_commit "$repo"
@@ -220,8 +234,22 @@ status=0
 "$GUARD" check git -C "$repo" -c remote.origin.url=git@github.com:kunchenguid/dotfiles.git push origin \
   >"$TMP_ROOT/gitc3.out" 2>"$TMP_ROOT/gitc3.err" || status=$?
 [ "$status" -eq 2 ] || fail "git -c remote.origin.url override to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c branch.main.pushRemote=git@github.com:kunchenguid/dotfiles.git push \
+  >"$TMP_ROOT/gitc4.out" 2>"$TMP_ROOT/gitc4.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c branch.<name>.pushRemote override to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c branch.main.pushRemote=upstream push \
+  >"$TMP_ROOT/gitc5.out" 2>"$TMP_ROOT/gitc5.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c branch.<name>.pushRemote remote-name override to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c remote.origin.pushurl= -c remote.origin.url=git@github.com:kunchenguid/dotfiles.git push origin \
+  >"$TMP_ROOT/gitc6.out" 2>"$TMP_ROOT/gitc6.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c empty pushurl with a protected url override should be refused, got $status"
 "$GUARD" check git -C "$repo" -c remote.pushDefault=origin push \
   || fail "git -c remote.pushDefault override to a local remote should be allowed"
+"$GUARD" check git -C "$repo" -c branch.main.pushRemote=origin push \
+  || fail "git -c branch.<name>.pushRemote override to a local remote should be allowed"
 "$GUARD" check git -C "$repo" push origin \
   || fail "git push to a local remote without -c should be allowed"
 pass "git -c config overrides are honored when resolving the push destination"

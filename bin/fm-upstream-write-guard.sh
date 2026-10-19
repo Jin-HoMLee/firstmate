@@ -448,7 +448,8 @@ parse_git_push() {
   done
   [ "$after_push" -eq 1 ] || return 1
   if [ -z "$GIT_REMOTE" ]; then
-    GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
+    GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".pushRemote 2>/dev/null || true)
+    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".remote 2>/dev/null || true)
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=origin
   fi
