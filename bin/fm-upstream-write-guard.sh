@@ -46,7 +46,7 @@ normalize_repo() {
   local value=$1 host path lower_value
   value=${value%/}
   value=${value%.git}
-  case "$value" in
+  case "$(lower "$value")" in
     https://*|http://*|ssh://*|git://*)
       host=${value#*://}
       host=${host#*@}
@@ -54,7 +54,7 @@ normalize_repo() {
       host=${host%%/*}
       host=${host%%:*}
       case "$(lower "$host")" in
-        github.com|ssh.github.com) ;;
+        github.com|ssh.github.com|api.github.com) ;;
         *) return 1 ;;
       esac
       value=$path
@@ -136,8 +136,8 @@ parse_top_sub_and_target() {
 
   if [ "$TOP" = api ]; then
     for arg in "$@"; do
-      case "$arg" in
-        /repos/*|repos/*|https://api.github.com/repos/*) set_target "$arg" api-path ;;
+      case "$(lower "$arg")" in
+        /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) set_target "$arg" api-path ;;
       esac
     done
   fi
