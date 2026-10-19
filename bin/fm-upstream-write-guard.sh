@@ -137,7 +137,22 @@ repo_destination() {
   done
 }
 
-TOP='' SUB='' TARGET='' MUTATION=0 REPO_SCOPED=0
+issue_transfer_destination() {
+  local arg expect_repo=0
+  for arg in "$@"; do
+    if [ "$expect_repo" -eq 1 ]; then expect_repo=0; continue; fi
+    case "$arg" in
+      -R|--repo) expect_repo=1; continue ;;
+      --repo=*|-R?*) continue ;;
+      -*) continue ;;
+      http://*|https://*) continue ;;
+      */*) printf '%s\n' "$arg"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+TOP='' SUB='' TARGET='' TRANSFER_DEST='' MUTATION=0 REPO_SCOPED=0
 set_target() {
   local candidate normalized
   candidate=$1
@@ -153,7 +168,7 @@ set_target() {
 parse_top_sub_and_target() {
   local tool=$1 arg expect_repo=0 seen_top=0 seen_sub=0 previous=
   shift
-  TOP='' SUB='' TARGET=''
+  TOP='' SUB='' TARGET='' TRANSFER_DEST=''
   for arg in "$@"; do
     if [ "$expect_repo" -eq 1 ]; then
       set_target "$arg" explicit-repository
@@ -197,6 +212,10 @@ parse_top_sub_and_target() {
     case "$SUB" in
       view|fork|edit|archive|delete|rename|sync|create) repo_destination "$SUB" "$@" ;;
     esac
+  fi
+
+  if [ "$TOP" = issue ] && [ "$SUB" = transfer ]; then
+    TRANSFER_DEST=$(issue_transfer_destination "$@") || TRANSFER_DEST=''
   fi
   : "$tool" "$previous"
 }
@@ -304,7 +323,13 @@ classify_gh() {
       ;;
     repo)
       case "$SUB" in
-        list|view|clone|'') ;;
+        list|view|clone|read-dir|read-file|gitignore|license|set-default|'') ;;
+        deploy-key)
+          case "${3:-}" in list) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+          ;;
+        autolink)
+          case "${3:-}" in list|view) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+          ;;
         fork)
           if fork_org "$@"; then
             MUTATION=1
@@ -357,6 +382,10 @@ check_gh() {
   fi
   if [ "$MUTATION" -eq 1 ] && [ -n "$TARGET" ] && repo_is_protected "$TARGET"; then
     refuse_reason "repository mutation against protected upstream '$TARGET' requires the exact captain-authorized interface"
+    return 2
+  fi
+  if [ "$MUTATION" -eq 1 ] && [ -n "$TRANSFER_DEST" ] && repo_is_protected "$TRANSFER_DEST"; then
+    refuse_reason "repository mutation against protected upstream '$TRANSFER_DEST' requires the exact captain-authorized interface"
     return 2
   fi
   return 0

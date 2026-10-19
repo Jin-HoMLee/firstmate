@@ -114,12 +114,28 @@ expect_refused gh repo fork someuser/somerepo --org=otherorg --org=kunchenguid
 expect_allowed gh repo fork kunchenguid/dotfiles --org otherorg
 pass "gh repo fork allows protected-source reads but refuses a protected-org destination"
 
+expect_allowed gh repo read-dir kunchenguid/dotfiles
+expect_allowed gh repo read-file kunchenguid/dotfiles --path README.md
+expect_allowed gh repo gitignore list
+expect_allowed gh repo license list
+expect_allowed gh repo deploy-key list -R kunchenguid/dotfiles
+expect_allowed gh repo autolink list -R kunchenguid/dotfiles
+expect_allowed gh repo set-default kunchenguid/dotfiles
+expect_refused gh repo deploy-key add -R kunchenguid/dotfiles key
+expect_refused gh repo autolink create -R kunchenguid/dotfiles --key-prefix x --url-template y
+pass "gh repo read-only subcommands stay available while deploy-key/autolink writes are blocked"
+
 for agent_alias in agent-task agent-tasks agent agents; do
   expect_refused gh "$agent_alias" create -R kunchenguid/dotfiles x
   expect_allowed gh "$agent_alias" create -R Jin-HoMLee/dotfiles x
   expect_allowed gh "$agent_alias" list -R kunchenguid/dotfiles
 done
 pass "gh agent-task create is blocked at protected upstreams across every alias"
+
+expect_refused gh issue transfer 123 kunchenguid/dotfiles -R myorg/myrepo
+expect_refused gh issue transfer 123 myorg/myrepo -R kunchenguid/dotfiles
+expect_allowed gh issue transfer 123 myorg/myrepo -R otherorg/otherrepo
+pass "gh issue transfer blocks a protected destination and protected source"
 
 policy_repo_own=$(node "$POLICY" --root "$ROOT" --command 'gh repo create myrepo')
 [ "$policy_repo_own" = allow ] || fail "primary shell policy blocked own-account repo creation: $policy_repo_own"
@@ -149,6 +165,13 @@ case "$policy_agent_task" in
   deny*) ;;
   *) fail "primary shell policy allowed an agent-task protected write: $policy_agent_task" ;;
 esac
+policy_issue_transfer=$(node "$POLICY" --root "$ROOT" --command 'gh issue transfer 123 kunchenguid/dotfiles -R myorg/myrepo')
+case "$policy_issue_transfer" in
+  deny*) ;;
+  *) fail "primary shell policy allowed a protected issue transfer: $policy_issue_transfer" ;;
+esac
+policy_read_dir=$(node "$POLICY" --root "$ROOT" --command 'gh repo read-dir kunchenguid/dotfiles')
+[ "$policy_read_dir" = allow ] || fail "primary shell policy blocked a read-only repo read-dir: $policy_read_dir"
 
 repo="$TMP_ROOT/repo"
 remote="$TMP_ROOT/remote.git"
