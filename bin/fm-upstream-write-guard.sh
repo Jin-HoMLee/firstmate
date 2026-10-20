@@ -238,7 +238,7 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg subsub method=GET query= query_seen=0 expect_value=0 org_repo_create=0 api_endpoint
+  local tool=$1 arg subsub method=GET query='' query_seen=0 expect_value=0 org_repo_create=0 api_endpoint
   shift
   MUTATION=0
   REPO_SCOPED=0

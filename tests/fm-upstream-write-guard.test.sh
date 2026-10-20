@@ -332,7 +332,7 @@ status=0
 MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env remote.origin.url=MYURL push origin main:main \
   >"$TMP_ROOT/gitce2.out" 2>"$TMP_ROOT/gitce2.err" || status=$?
 [ "$status" -eq 2 ] || fail "git --config-env two-arg remote.origin.url override should be refused, got $status"
-MYNAME=test "$GUARD" check git -C "$repo" --config-env=user.name=MYNAME push origin main:main \
+MYNAME='test' "$GUARD" check git -C "$repo" --config-env=user.name=MYNAME push origin main:main \
   || fail "git --config-env for a non-destination key should be allowed"
 pass "git --config-env push-destination overrides are refused when unresolvable"
 
@@ -417,7 +417,7 @@ policy_read=$(node "$POLICY" --root "$ROOT" --command 'gh-axi pr view 48 -R kunc
 for wrapped in \
   "( gh pr create -R kunchenguid/dotfiles --title x )" \
   "bash -c 'gh pr create -R kunchenguid/dotfiles --title x'" \
-  'echo $(gh pr create -R kunchenguid/dotfiles --title x)'; do
+  "echo \$(gh pr create -R kunchenguid/dotfiles --title x)"; do
   policy_nested=$(node "$POLICY" --root "$ROOT" --command "$wrapped")
   case "$policy_nested" in
     deny*) ;;
@@ -466,7 +466,7 @@ for payload in \
   'f() { gh pr create -R kunchenguid/dotfiles --title x; }; f' \
   "bash <<< 'gh pr create -R kunchenguid/dotfiles --title x'" \
   'eval "gh pr create -R kunchenguid/dotfiles --title x"' \
-  'eval "gh pr create -R kunchenguid/dotfiles --title $x"'; do
+  "eval \"gh pr create -R kunchenguid/dotfiles --title \$x\""; do
   policy_payload=$(node "$POLICY" --root "$ROOT" --command "$payload")
   case "$policy_payload" in
     deny*) ;;
