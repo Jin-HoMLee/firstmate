@@ -227,7 +227,7 @@ parse_top_sub_and_target() {
 
   if [ "$TOP" = repo ]; then
     case "$SUB" in
-      view|fork|edit|archive|delete|rename|sync|create) repo_destination "$SUB" "$@" ;;
+      view|fork|edit|archive|unarchive|delete|rename|sync|create) repo_destination "$SUB" "$@" ;;
     esac
   fi
 
@@ -402,8 +402,8 @@ check_gh() {
     refuse_reason "conflicting or incomplete repository selectors; refusing before any GitHub operation"
     return 2
   fi
-  if [ "$TOP" = api ] && [ "$SUB" = graphql ] && [ "$MUTATION" -eq 1 ] && [ -z "$TARGET" ]; then
-    refuse_reason "gh api graphql mutation must name its exact repository with -R/--repo (query-body targets cannot be verified locally)"
+  if [ "$TOP" = api ] && [ "$SUB" = graphql ] && [ "$MUTATION" -eq 1 ]; then
+    refuse_reason "gh api graphql mutation must run through the exact captain-authorized interface (query-body targets cannot be verified locally)"
     return 2
   fi
   if [ "$MUTATION" -eq 1 ] && [ "$REPO_SCOPED" -eq 1 ] && [ -z "$TARGET" ]; then
@@ -423,14 +423,14 @@ check_gh() {
 
 GIT_REPO_DIR='' GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
 config_env_names_destination() {
-  case "${1%%=*}" in
-    remote.pushDefault|branch.*.remote|branch.*.pushRemote|remote.*.url|remote.*.pushurl|url.*.insteadOf|url.*.pushInsteadOf) return 0 ;;
+  case "$(lower "${1%%=*}")" in
+    remote.pushdefault|branch.*.remote|branch.*.pushremote|remote.*.url|remote.*.pushurl|url.*.insteadof|url.*.pushinsteadof) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 parse_git_push() {
-  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 candidates url target rule key prefix base
+  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 fail_closed=0 candidates url target rule key prefix base
   local -a c_overrides=()
   GIT_REPO_DIR=$PWD
   GIT_REMOTE=
@@ -455,6 +455,8 @@ parse_git_push() {
         -c) expect_c_override=1 ;;
         --config-env) expect_config_env=1 ;;
         --config-env=*) config_env_names_destination "${arg#--config-env=}" && config_env_dest=1 ;;
+        --git-dir|--work-tree|--namespace) fail_closed=1 ;;
+        --git-dir=*|--work-tree=*|--namespace=*) fail_closed=1 ;;
         push) after_push=1 ;;
       esac
       continue
@@ -473,6 +475,7 @@ parse_git_push() {
   done
   [ "$after_push" -eq 1 ] || return 1
   [ "$config_env_dest" -eq 0 ] || return 3
+  [ "$fail_closed" -eq 0 ] || return 3
   if [ -z "$GIT_REMOTE" ]; then
     GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".pushRemote 2>/dev/null || true)
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get remote.pushDefault 2>/dev/null || true)

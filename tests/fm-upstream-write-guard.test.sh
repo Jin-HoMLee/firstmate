@@ -76,6 +76,10 @@ expect_allowed gh api /orgs/kunchenguid/repos
 expect_allowed gh api -X POST /user/repos -f name=myrepo
 pass "gh api org-level repository creation into kunchenguid is blocked"
 
+expect_refused gh api graphql -R someuser/somerepo -f 'query=mutation { createRepository(input:{name:"x", ownerId:"id"}) }'
+expect_allowed gh api graphql -f 'query={ organization(login:"kunchenguid"){ id } }'
+pass "gh api graphql mutations refuse through the normal path regardless of -R scope"
+
 expect_refused gh-axi pr create --title accidental
 expect_refused gh pr create --title accidental
 assert_contains "$(cat "$TMP_ROOT/err")" "must name its exact repository" \
@@ -106,6 +110,10 @@ expect_allowed gh repo create myrepo -s kunchenguid/dotfiles
 expect_allowed gh repo create myorg/myrepo --source kunchenguid/dotfiles
 expect_refused gh repo create kunchenguid/newrepo --source Jin-HoMLee/dotfiles
 pass "gh repo create keeps protected --source/--template inputs distinct from its destination"
+
+expect_allowed gh repo unarchive someuser/somerepo
+expect_refused gh repo unarchive kunchenguid/dotfiles
+pass "gh repo unarchive mirrors archive: non-protected destinations are allowed"
 
 expect_refused gh repo create kunchenguid/newrepo -h https://example.com
 expect_refused gh repo create -h https://example.com kunchenguid/newrepo
@@ -324,6 +332,18 @@ status=0
   || fail "git push to a local remote without -c should be allowed"
 pass "git -c config overrides are honored when resolving the push destination"
 
+for flag in "--git-dir=$repo/.git" "--work-tree=$repo" "--namespace=test"; do
+  status=0
+  "$GUARD" check git -C "$repo" $flag push origin main:main \
+    >"$TMP_ROOT/gitdir.out" 2>"$TMP_ROOT/gitdir.err" || status=$?
+  [ "$status" -eq 2 ] || fail "git $flag before push should fail closed, got $status"
+done
+status=0
+"$GUARD" check git -C "$repo" --git-dir "$repo/.git" push origin main:main \
+  >"$TMP_ROOT/gitdir2.out" 2>"$TMP_ROOT/gitdir2.err" || status=$?
+[ "$status" -eq 2 ] || fail "git --git-dir two-arg form before push should fail closed, got $status"
+pass "git --git-dir/--work-tree/--namespace before push fail closed"
+
 status=0
 MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env=remote.origin.url=MYURL push origin main:main \
   >"$TMP_ROOT/gitce1.out" 2>"$TMP_ROOT/gitce1.err" || status=$?
@@ -332,6 +352,14 @@ status=0
 MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env remote.origin.url=MYURL push origin main:main \
   >"$TMP_ROOT/gitce2.out" 2>"$TMP_ROOT/gitce2.err" || status=$?
 [ "$status" -eq 2 ] || fail "git --config-env two-arg remote.origin.url override should be refused, got $status"
+status=0
+MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env=remote.origin.pushUrl=MYURL push origin main:main \
+  >"$TMP_ROOT/gitce3.out" 2>"$TMP_ROOT/gitce3.err" || status=$?
+[ "$status" -eq 2 ] || fail "git --config-env mixed-case destination key should be refused, got $status"
+status=0
+MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env remote.origin.pushUrl=MYURL push origin main:main \
+  >"$TMP_ROOT/gitce4.out" 2>"$TMP_ROOT/gitce4.err" || status=$?
+[ "$status" -eq 2 ] || fail "git --config-env two-arg mixed-case destination key should be refused, got $status"
 MYNAME='test' "$GUARD" check git -C "$repo" --config-env=user.name=MYNAME push origin main:main \
   || fail "git --config-env for a non-destination key should be allowed"
 pass "git --config-env push-destination overrides are refused when unresolvable"
