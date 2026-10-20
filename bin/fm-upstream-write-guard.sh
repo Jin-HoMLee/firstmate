@@ -25,7 +25,9 @@
 # /repos/<owner>/<repo>/ path. This deliberately refuses mutation commands that
 # rely on fork-aware default resolution: gh may select a fork's parent even
 # when origin is the personal fork. Read-only commands stay available with or
-# without a selector.
+# without a selector. gh api graphql mutations are refused even when named,
+# because query-body targets cannot be verified locally; only authorize may run
+# one.
 # Note: git push --no-verify skips the pre-push check and is an accepted, deliberate-action-only residual.
 set -u
 
