@@ -63,6 +63,12 @@ expect_refused gh api repos/kunchenguid/dotfiles/issues -f title=x
 expect_allowed gh api repos/kunchenguid/dotfiles/issues
 pass "gh api repo-path mutations refuse when {owner}/{repo} placeholders hide the target"
 
+expect_refused gh api -X POST /orgs/kunchenguid/repos -f name=newrepo
+expect_refused gh api -X POST orgs/kunchenguid/repos -f name=newrepo
+expect_allowed gh api /orgs/kunchenguid/repos
+expect_allowed gh api -X POST /user/repos -f name=myrepo
+pass "gh api org-level repository creation into kunchenguid is blocked"
+
 expect_refused gh-axi pr create --title accidental
 expect_refused gh pr create --title accidental
 assert_contains "$(cat "$TMP_ROOT/err")" "must name its exact repository" \
@@ -194,6 +200,12 @@ case "$policy_api_placeholder" in
   *) fail "primary shell policy allowed a protected gh api placeholder mutation: $policy_api_placeholder" ;;
 esac
 
+policy_api_org_repo=$(node "$POLICY" --root "$ROOT" --command "gh api -X POST /orgs/kunchenguid/repos -f name=newrepo")
+case "$policy_api_org_repo" in
+  deny*) ;;
+  *) fail "primary shell policy allowed an org-level repository creation into kunchenguid: $policy_api_org_repo" ;;
+esac
+
 policy_nice_unresolved=$(node "$POLICY" --root "$ROOT" --command 'nice -10 gh pr create -R kunchenguid/dotfiles --title x')
 case "$policy_nice_unresolved" in
   deny*) ;;
@@ -266,6 +278,7 @@ fm_git_init_commit "$repo"
 git init -q --bare "$remote"
 git -C "$repo" remote add origin "$remote"
 git -C "$repo" remote add upstream git@github.com:kunchenguid/dotfiles.git
+git -C "$repo" remote add someuser git@github.com:someuser/somerepo.git
 status=0
 "$GUARD" check git -C "$repo" push upstream HEAD:refs/heads/test >"$TMP_ROOT/git.out" 2>"$TMP_ROOT/git.err" || status=$?
 [ "$status" -eq 2 ] || fail "protected git push should be refused locally"
@@ -315,6 +328,18 @@ MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --co
 MYNAME=test "$GUARD" check git -C "$repo" --config-env=user.name=MYNAME push origin main:main \
   || fail "git --config-env for a non-destination key should be allowed"
 pass "git --config-env push-destination overrides are refused when unresolvable"
+
+status=0
+"$GUARD" check git -C "$repo" -c 'url.git@github.com:kunchenguid/dotfiles.git.insteadOf=git@github.com:someuser/somerepo.git' push someuser main:main \
+  >"$TMP_ROOT/gitio1.out" 2>"$TMP_ROOT/gitio1.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c url.*.insteadOf redirect to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c 'url.git@github.com:kunchenguid/dotfiles.git.pushInsteadOf=git@github.com:someuser/somerepo.git' push someuser main:main \
+  >"$TMP_ROOT/gitio2.out" 2>"$TMP_ROOT/gitio2.err" || status=$?
+[ "$status" -eq 2 ] || fail "git -c url.*.pushInsteadOf redirect to a protected remote should be refused, got $status"
+"$GUARD" check git -C "$repo" push someuser main:main \
+  || fail "git push to a non-protected remote without insteadOf should be allowed"
+pass "git -c url.*.insteadOf/pushInsteadOf destination redirects are detected"
 
 for ssh_url in \
   ssh://git@ssh.github.com:443/kunchenguid/dotfiles.git \

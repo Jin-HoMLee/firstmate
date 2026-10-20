@@ -238,7 +238,7 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg subsub method=GET query= query_seen=0 expect_value=0
+  local tool=$1 arg subsub method=GET query= query_seen=0 expect_value=0 org_repo_create=0
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -316,6 +316,7 @@ classify_gh() {
       for arg in "$@"; do
         case "$(lower "$arg")" in
           /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
+          orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos) org_repo_create=1 ;;
         esac
         case "$arg" in
           -X|--method) method=EXPECT ;;
@@ -339,6 +340,10 @@ classify_gh() {
         fi
       else
         case "$method" in GET|HEAD) ;; *) MUTATION=1 ;; esac
+      fi
+      if [ "$org_repo_create" -eq 1 ] && [ "$MUTATION" -eq 1 ]; then
+        TARGET=$PROTECTED_OWNER/repos
+        REPO_SCOPED=1
       fi
       ;;
     repo)
@@ -416,7 +421,7 @@ check_gh() {
 GIT_REPO_DIR='' GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
 config_env_names_destination() {
   case "${1%%=*}" in
-    remote.pushDefault|branch.*.remote|branch.*.pushRemote|remote.*.url|remote.*.pushurl) return 0 ;;
+    remote.pushDefault|branch.*.remote|branch.*.pushRemote|remote.*.url|remote.*.pushurl|url.*.insteadOf|url.*.pushInsteadOf) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -476,8 +481,7 @@ parse_git_push() {
       candidates=$GIT_REMOTE
       ;;
     *)
-      candidates=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-all remote."$GIT_REMOTE".pushurl 2>/dev/null || true)
-      [ -n "$candidates" ] || candidates=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-all remote."$GIT_REMOTE".url 2>/dev/null || true)
+      candidates=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" remote get-url --all --push "$GIT_REMOTE" 2>/dev/null || true)
       ;;
   esac
   [ -n "$candidates" ] || return 2
