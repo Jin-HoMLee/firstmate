@@ -334,7 +334,7 @@ pass "git -c config overrides are honored when resolving the push destination"
 
 for flag in "--git-dir=$repo/.git" "--work-tree=$repo" "--namespace=test"; do
   status=0
-  "$GUARD" check git -C "$repo" $flag push origin main:main \
+  "$GUARD" check git -C "$repo" "$flag" push origin main:main \
     >"$TMP_ROOT/gitdir.out" 2>"$TMP_ROOT/gitdir.err" || status=$?
   [ "$status" -eq 2 ] || fail "git $flag before push should fail closed, got $status"
 done
