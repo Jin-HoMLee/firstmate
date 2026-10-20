@@ -316,7 +316,7 @@ classify_gh() {
       for arg in "$@"; do
         case "$(lower "$arg")" in
           /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
-          orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos) org_repo_create=1 ;;
+          orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
         esac
         case "$arg" in
           -X|--method) method=EXPECT ;;
@@ -478,6 +478,9 @@ parse_git_push() {
   fi
   case "$GIT_REMOTE" in
     *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*)
+      if [ -n "$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null || true)" ]; then
+        return 3
+      fi
       candidates=$GIT_REMOTE
       ;;
     *)
@@ -506,7 +509,7 @@ check_git() {
   case $? in
     1) return 0 ;;
     2) refuse_reason "cannot resolve git push destination '$GIT_REMOTE' locally; refusing before network access"; return 2 ;;
-    3) refuse_reason "git push destination is overridden via --config-env from an environment variable and cannot be verified locally; refusing before network access"; return 2 ;;
+    3) refuse_reason "git push destination is overridden or redirected in a way that cannot be verified locally; refusing before network access"; return 2 ;;
   esac
   if [ -n "$GIT_TARGET" ] && repo_is_protected "$GIT_TARGET"; then
     refuse_reason "git push to protected upstream '$GIT_TARGET' requires the exact captain-authorized interface"

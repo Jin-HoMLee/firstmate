@@ -65,6 +65,10 @@ pass "gh api repo-path mutations refuse when {owner}/{repo} placeholders hide th
 
 expect_refused gh api -X POST /orgs/kunchenguid/repos -f name=newrepo
 expect_refused gh api -X POST orgs/kunchenguid/repos -f name=newrepo
+expect_refused gh api -X POST https://api.github.com/orgs/kunchenguid/repos -f name=newrepo
+expect_refused gh api -X POST http://api.github.com/orgs/kunchenguid/repos -f name=newrepo
+expect_refused gh api -X POST /orgs/kunchenguid/repos/ -f name=newrepo
+expect_refused gh api -X POST orgs/kunchenguid/repos/ -f name=newrepo
 expect_allowed gh api /orgs/kunchenguid/repos
 expect_allowed gh api -X POST /user/repos -f name=myrepo
 pass "gh api org-level repository creation into kunchenguid is blocked"
@@ -340,6 +344,18 @@ status=0
 "$GUARD" check git -C "$repo" push someuser main:main \
   || fail "git push to a non-protected remote without insteadOf should be allowed"
 pass "git -c url.*.insteadOf/pushInsteadOf destination redirects are detected"
+
+status=0
+"$GUARD" check git -C "$repo" -c 'url.git@github.com:kunchenguid/dotfiles.git.insteadOf=git@github.com:someuser/somerepo.git' push git@github.com:someuser/somerepo.git main:main \
+  >"$TMP_ROOT/gitio3.out" 2>"$TMP_ROOT/gitio3.err" || status=$?
+[ "$status" -eq 2 ] || fail "git direct-URL insteadOf redirect to a protected remote should be refused, got $status"
+status=0
+"$GUARD" check git -C "$repo" -c 'url.git@github.com:kunchenguid/dotfiles.git.pushInsteadOf=git@github.com:someuser/somerepo.git' push git@github.com:someuser/somerepo.git main:main \
+  >"$TMP_ROOT/gitio4.out" 2>"$TMP_ROOT/gitio4.err" || status=$?
+[ "$status" -eq 2 ] || fail "git direct-URL pushInsteadOf redirect to a protected remote should be refused, got $status"
+"$GUARD" check git -C "$repo" push git@github.com:someuser/somerepo.git main:main \
+  || fail "git push to a direct non-protected URL without insteadOf should be allowed"
+pass "git direct-URL insteadOf/pushInsteadOf redirects are detected"
 
 for ssh_url in \
   ssh://git@ssh.github.com:443/kunchenguid/dotfiles.git \
