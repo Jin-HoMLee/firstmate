@@ -238,7 +238,7 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg subsub method=GET query= query_seen=0 expect_value=0 org_repo_create=0
+  local tool=$1 arg subsub method=GET query= query_seen=0 expect_value=0 org_repo_create=0 api_endpoint
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -314,7 +314,10 @@ classify_gh() {
     api)
       [ -n "$TARGET" ] && REPO_SCOPED=1
       for arg in "$@"; do
-        case "$(lower "$arg")" in
+        api_endpoint=$(lower "$arg")
+        api_endpoint=${api_endpoint%%\?*}
+        api_endpoint=${api_endpoint%%\#*}
+        case "$api_endpoint" in
           /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
           orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
         esac
@@ -427,7 +430,7 @@ config_env_names_destination() {
 }
 
 parse_git_push() {
-  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 candidates url target
+  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 candidates url target rule key prefix base
   local -a c_overrides=()
   GIT_REPO_DIR=$PWD
   GIT_REMOTE=
@@ -478,9 +481,21 @@ parse_git_push() {
   fi
   case "$GIT_REMOTE" in
     *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*)
-      if [ -n "$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null || true)" ]; then
-        return 3
-      fi
+      while IFS= read -r rule; do
+        [ -n "$rule" ] || continue
+        key=${rule%% *}
+        prefix=${rule#* }
+        base=${key#url.}
+        base=${base%.pushInsteadOf}
+        base=${base%.insteadOf}
+        case "$GIT_REMOTE" in
+          "$prefix"*)
+            if repo_is_protected "$base"; then
+              return 3
+            fi
+            ;;
+        esac
+      done <<< "$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null || true)"
       candidates=$GIT_REMOTE
       ;;
     *)

@@ -69,6 +69,9 @@ expect_refused gh api -X POST https://api.github.com/orgs/kunchenguid/repos -f n
 expect_refused gh api -X POST http://api.github.com/orgs/kunchenguid/repos -f name=newrepo
 expect_refused gh api -X POST /orgs/kunchenguid/repos/ -f name=newrepo
 expect_refused gh api -X POST orgs/kunchenguid/repos/ -f name=newrepo
+expect_refused gh api -X POST 'https://api.github.com/orgs/kunchenguid/repos?foo=bar' -f name=newrepo
+expect_refused gh api -X POST '/orgs/kunchenguid/repos?foo=bar' -f name=newrepo
+expect_refused gh api -X POST 'orgs/kunchenguid/repos?foo=bar' -f name=newrepo
 expect_allowed gh api /orgs/kunchenguid/repos
 expect_allowed gh api -X POST /user/repos -f name=myrepo
 pass "gh api org-level repository creation into kunchenguid is blocked"
@@ -355,6 +358,10 @@ status=0
 [ "$status" -eq 2 ] || fail "git direct-URL pushInsteadOf redirect to a protected remote should be refused, got $status"
 "$GUARD" check git -C "$repo" push git@github.com:someuser/somerepo.git main:main \
   || fail "git push to a direct non-protected URL without insteadOf should be allowed"
+"$GUARD" check git -C "$repo" -c 'url.git@github.com:.insteadOf=https://github.com/' push git@github.com:someuser/somerepo.git main:main \
+  || fail "git direct non-protected URL with a non-matching insteadOf rule should be allowed"
+"$GUARD" check git -C "$repo" -c 'url.git@github.com:.insteadOf=https://github.com/' push https://github.com/someuser/somerepo.git main:main \
+  || fail "git direct non-protected URL with a non-protected insteadOf base should be allowed"
 pass "git direct-URL insteadOf/pushInsteadOf redirects are detected"
 
 for ssh_url in \
