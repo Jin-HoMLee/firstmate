@@ -1,0 +1,65 @@
+==============================================================
+1. Worker tries to open a PR against the protected upstream
+==============================================================
+upstream-write-guard: repository mutation against protected upstream 'kunchenguid/dotfiles' requires the exact captain-authorized interface
+[exit=2]
+
+2. Worker tries the fork-aware default (no -R) PR create
+--------------------------------------------------------------
+upstream-write-guard: repository mutation 'gh pr create' must name its exact repository with -R/--repo (fork-aware defaults are forbidden)
+[exit=2]
+
+3. Read-only upstream operations remain available
+--------------------------------------------------------------
+[exit=0]
+
+4. An explicit personal fork remains allowed
+--------------------------------------------------------------
+[exit=0]
+
+5. Decoy -R graphql mutation is refused (query-body target)
+--------------------------------------------------------------
+upstream-write-guard: gh api graphql mutation must run through the exact captain-authorized interface (query-body targets cannot be verified locally)
+[exit=2]
+
+6. gh repo unarchive mirrors archive
+--------------------------------------------------------------
+upstream-write-guard: repository mutation against protected upstream 'kunchenguid/dotfiles' requires the exact captain-authorized interface
+[exit=2]
+[exit=0]
+
+7. Only allowed commands reached the forge stub
+--------------------------------------------------------------
+gh pr view 48 -R kunchenguid/dotfiles
+gh pr create -R Jin-HoMLee/dotfiles --title intended
+gh repo unarchive someuser/somerepo
+
+==============================================================
+8. Primary PreToolUse policy output (the exact PR-create intent)
+==============================================================
+deny	protected-upstream-write	upstream-write-guard: repository mutation against protected upstream 'kunchenguid/dotfiles' requires the exact captain-authorized interface
+
+allow
+
+
+==============================================================
+9. The only override: exact captain words + exact repo
+==============================================================
+--- worker tries to authorize (must be refused) ---
+error: workers cannot authorize protected-upstream writes; route the exact captain instruction through firstmate
+[exit=2]
+--- firstmate (no FM_TASK_ID) authorizes the exact operation ---
+[exit=0]
+--- audit record ---
+/private/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T/tmp.8JmfNRZBm5/home/state/upstream-write-authorizations/20261020T023858Z-53637.1792463938.record
+version=1
+created=20261020T023858Z
+repo=kunchenguid/dotfiles
+command=gh-axi pr create -R kunchenguid/dotfiles --title upstream-sync
+captain_words_sha256=cb073b22523ab3d64d9324ae6315268c71640b5c11826ad647da3cbf4a2c642a
+captain_words<<EOF
+Open exactly one PR in kunchenguid/dotfiles titled upstream-sync.
+
+EOF
+result=pending
+result=exit-0

@@ -1,0 +1,19 @@
+1. git push to the protected upstream remote is refused
+upstream-write-guard: git push to protected upstream 'kunchenguid/dotfiles' requires the exact captain-authorized interface
+[exit=2]
+
+2. --git-dir / --work-tree / --namespace before push fail closed
+upstream-write-guard: git push destination is overridden or redirected in a way that cannot be verified locally; refusing before network access
+  --git-dir=/private/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T/tmp.uY4i2Tipst/repo/.git -> [exit=2]
+upstream-write-guard: git push destination is overridden or redirected in a way that cannot be verified locally; refusing before network access
+  --work-tree=/private/var/folders/ny/97nfvbms25lb47qpfvgmgfc40000gn/T/tmp.uY4i2Tipst/repo -> [exit=2]
+upstream-write-guard: git push destination is overridden or redirected in a way that cannot be verified locally; refusing before network access
+  --namespace=test -> [exit=2]
+
+3. mixed-case --config-env destination key is refused (was a bypass)
+upstream-write-guard: git push destination is overridden or redirected in a way that cannot be verified locally; refusing before network access
+[exit=2]
+
+4. a normal push to a non-protected local remote stays allowed
+[exit=0]
+  (local push reached the bare remote)
