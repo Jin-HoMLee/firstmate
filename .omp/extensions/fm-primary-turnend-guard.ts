@@ -476,7 +476,8 @@ function runGuard(stopHookActive: boolean): Promise<{ code: number; stderr: stri
 }
 
 // PreToolUse seatbelts (bin/fm-arm-pretool-check.sh, docs/arm-pretool-check.md;
-// bin/fm-cd-pretool-check.sh, docs/cd-guard.md). Both piggyback on this same
+// bin/fm-cd-pretool-check.sh, docs/cd-guard.md; bin/fm-upstream-write-pretool-check.sh,
+// .agents/skills/upstream-write-guard/SKILL.md). All three piggyback on this same
 // extension file so no extra -e flag is needed: omp auto-discovers this file
 // for the turn-end guard, and pi.on("tool_call", ...) can block (verified on
 // omp 18.1.2: returning {block: true, reason} refused the bash command and

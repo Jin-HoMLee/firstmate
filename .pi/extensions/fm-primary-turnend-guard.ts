@@ -470,7 +470,8 @@ function runGuard(): Promise<{ code: number; stderr: string }> {
 }
 
 // PreToolUse seatbelts (bin/fm-arm-pretool-check.sh, docs/arm-pretool-check.md;
-// bin/fm-cd-pretool-check.sh, docs/cd-guard.md). Both piggyback on this same
+// bin/fm-cd-pretool-check.sh, docs/cd-guard.md; bin/fm-upstream-write-pretool-check.sh,
+// .agents/skills/upstream-write-guard/SKILL.md). All three piggyback on this same
 // extension file rather than separate ones so no extra Pi -e flag is needed at
 // launch - the primary already loads this file for the turn-end guard, and
 // pi.on("tool_call", ...) can block (verified 2026-07-09 against pi 0.80.5:
