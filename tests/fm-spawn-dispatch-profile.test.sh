@@ -90,7 +90,8 @@ make_seeded_secondmate_home() {
 ai_trailer_hooks_prefix() {  # <home> <id>
   local state
   state=$(CDPATH='' cd -- "$1/state" && pwd -P) || fail "cannot resolve state dir $1/state"
-  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s'; " "$state/$2.git-hooks"
+  printf "export PATH='%s':\$PATH; export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s'; " \
+    "$state/$2.github-guard-bin" "$state/$2.git-hooks"
 }
 
 run_spawn() {
@@ -1301,7 +1302,7 @@ SH
         enabled) expected=$(printf '%s\n' unset "$value" '' unset) ;;
         empty) expected=$(printf '%s\n' unset unset unset unset) ;;
       esac
-      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
+      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$HOME_DIR/state/$id.github-guard-bin:$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
       [ "$result" = "$expected" ] || fail "allowlist=$setting worker environment mismatch: $result"
     done
     pass "allowlist=$setting preserves the operational floor and filters only when opted in"
@@ -1563,9 +1564,15 @@ SH
 # must both produce today's launch byte-for-byte, `auto` swaps only the
 # permission flag, and any other token refuses before endpoint or metadata.
 claude_launch_brief_arg() {  # <launch>
-  local command=${1#*; }
+  local command=$1
+  while :; do
+    case "$command" in
+      export\ *'; '*) command=${command#*; } ;;
+      *) break ;;
+    esac
+  done
   (
-    eval "set -- ${command#*; }"
+    eval "set -- $command"
     eval "printf '%s' \"\${$#}\""
   )
 }

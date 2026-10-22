@@ -49,6 +49,7 @@ This repo is a shared template, while `.env`, `data/`, `state/`, `config/`, `pro
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
 Never add an agent name as a commit co-author.
 Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and compatible `lavish-axi` for visual decisions or reports; consult current help rather than memorizing flags.
+Load `upstream-write-guard` before any write to a `kunchenguid/*` repository; ordinary GitHub and git paths block those writes.
 
 ## 2. Layout and state
 

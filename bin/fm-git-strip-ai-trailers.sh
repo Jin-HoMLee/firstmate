@@ -19,9 +19,11 @@
 #       because git -c core.hooksPath=<this dir> (or a child process that
 #       inherits it) carries the override there, and a lookup that honored it
 #       would find this directory again and never run the repository's own
-#       hook - a skipped pre-push guard. A lookup that fails exits nonzero
-#       rather than skipping the repository's hook. Does not touch the
-#       project's git config; the caller prefixes the pane with
+#       hook - a skipped pre-push guard. The generated pre-push wrapper first
+#       runs fm-upstream-write-guard.sh against git's resolved remote URL, then
+#       chains the repository hook with the original stdin still untouched.
+#       A lookup that fails exits nonzero rather than skipping the repository's
+#       hook. Does not touch the project's git config; the caller prefixes the pane with
 #       GIT_CONFIG_COUNT / GIT_CONFIG_KEY_0 / GIT_CONFIG_VALUE_0.
 #
 # WHY THIS EXISTS. Claude launches already carry attribution-off in their
@@ -58,6 +60,7 @@ set -u
 unset CDPATH GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
 SELF="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+UPSTREAM_GUARD="$(dirname "$SELF")/fm-upstream-write-guard.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -226,11 +229,20 @@ $(runtime_chain_body "$hooks_dir")
 EOF
 
   for name in $FM_GIT_CLIENT_HOOKS; do
-    write_executable "$hooks_dir/$name" <<EOF
+    if [ "$name" = pre-push ]; then
+      write_executable "$hooks_dir/$name" <<EOF
+#!/usr/bin/env bash
+set -u
+$(quote_for_hook "$UPSTREAM_GUARD") pre-push "\${1:-}" "\${2:-}" || exit \$?
+$(runtime_chain_body "$hooks_dir")
+EOF
+    else
+      write_executable "$hooks_dir/$name" <<EOF
 #!/usr/bin/env bash
 set -u
 $(runtime_chain_body "$hooks_dir")
 EOF
+    fi
   done
   chmod 500 "$hooks_dir"
 }

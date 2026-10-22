@@ -470,7 +470,8 @@ function runGuard(): Promise<{ code: number; stderr: string }> {
 }
 
 // PreToolUse seatbelts (bin/fm-arm-pretool-check.sh, docs/arm-pretool-check.md;
-// bin/fm-cd-pretool-check.sh, docs/cd-guard.md). Both piggyback on this same
+// bin/fm-cd-pretool-check.sh, docs/cd-guard.md; bin/fm-upstream-write-pretool-check.sh,
+// .agents/skills/upstream-write-guard/SKILL.md). All three piggyback on this same
 // extension file rather than separate ones so no extra Pi -e flag is needed at
 // launch - the primary already loads this file for the turn-end guard, and
 // pi.on("tool_call", ...) can block (verified 2026-07-09 against pi 0.80.5:
@@ -506,6 +507,10 @@ function runPretoolCheck(command: string): Promise<{ code: number; stderr: strin
 
 function runCdCheck(command: string): Promise<{ code: number; stderr: string }> {
   return runChecker("fm-cd-pretool-check.sh", command);
+}
+
+function runUpstreamWriteCheck(command: string): Promise<{ code: number; stderr: string }> {
+  return runChecker("fm-upstream-write-pretool-check.sh", command);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -594,6 +599,10 @@ export default function (pi: ExtensionAPI) {
     const cdResult = await runCdCheck(command);
     if (cdResult.code === 2) {
       return { block: true, reason: cdResult.stderr.trim() || "denied by the cd-guard PreToolUse seatbelt" };
+    }
+    const upstreamResult = await runUpstreamWriteCheck(command);
+    if (upstreamResult.code === 2) {
+      return { block: true, reason: upstreamResult.stderr.trim() || "denied by the protected-upstream write guard" };
     }
     const result = await runPretoolCheck(command);
     if (result.code !== 2) return {};

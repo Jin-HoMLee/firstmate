@@ -379,7 +379,7 @@ family_for_basename() {
     fm-send-inbox.test.sh|fm-spawn-batch.test.sh|\
     fm-spawn-dispatch-profile.test.sh|fm-claude-trust.test.sh|\
     fm-worker-account.test.sh|\
-    fm-git-strip-ai-trailers.test.sh|\
+    fm-git-strip-ai-trailers.test.sh|fm-upstream-write-guard.test.sh|\
     fm-trace-context-spawn.test.sh|fm-spawn-worktree-settle.test.sh|\
     fm-spawn-compact-adviser-disable.test.sh|\
     fm-spawn-compact-adviser-disable-remote.test.sh|\
@@ -1480,6 +1480,12 @@ families_for_changed_path() {
       # bin/fm-dispatch-resolve.sh (TYPESAFE_API_KEY).
       printf '%s\n' pr-forge
       printf '%s\n' "__script__:fm-dispatch-resolve.test.sh"
+      ;;
+    bin/fm-upstream-write-guard.sh|bin/fm-upstream-write-pretool-check.sh|\
+    bin/fm-upstream-write-command-policy.mjs|.agents/skills/upstream-write-guard/SKILL.md|\
+    .grok/hooks/fm-primary-upstream-write-check.json|\
+    .opencode/plugins/fm-primary-upstream-write-check.js)
+      printf '%s\n' __script__:fm-upstream-write-guard.test.sh
       ;;
     .pi/extensions/fm-branch-supervision.ts|.pi/extensions/lib/fm-async-exec.ts|\
     .pi/extensions/lib/fm-branch-dispatch.ts|.pi/extensions/lib/fm-native-contract.ts)

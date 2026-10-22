@@ -970,6 +970,7 @@ Every claude launch's inline `--settings` JSON also carries `"attribution":{"com
 Every fleet launch, Claude included, also receives a pane-scoped `GIT_CONFIG` `core.hooksPath` pointing at `state/<id>.git-hooks`, so git's `commit-msg` hook strips known AI trailers at the commit object even when a runtime injects them after the typed message.
 `bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs.
 If the wrapper cannot resolve that repository's hooks directory, the git operation fails rather than silently skipping a project hook such as a pre-push guard.
+The same launch prepends read-only `gh` and `gh-axi` shims and makes the generated `pre-push` hook refuse writes to protected `kunchenguid/*` upstream repositories; `upstream-write-guard` owns the exact captain-authorized exception and `bin/fm-upstream-write-guard.sh` owns its mechanics.
 That directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
 
