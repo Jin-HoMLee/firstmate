@@ -3,6 +3,7 @@
 #
 # Usage:
 #   fm-procevent-lavish.sh arm <artifact.html> [--for <task-id>] [--agent-reply-file <path>]
+#   fm-procevent-lavish.sh reply <artifact.html> --agent-reply-file <path>
 #   fm-procevent-lavish.sh classify <result-file>
 #   fm-procevent-lavish.sh terminal <result-file>
 #   fm-procevent-lavish.sh silent <result-file>
@@ -13,6 +14,17 @@
 #   fm-procevent-lavish.sh retire <artifact.html>
 #   fm-procevent-lavish.sh poll <artifact.html> [--agent-reply-file <path>]
 #
+# reply      Post only to the artifact's existing saved session through Lavish's
+#            server API (POST /api/:key/agent-reply, JSON {text}, {status:sent}).
+#            Version-pinned to the verified installed 0.1.78 server contract
+#            and a matching state directory; other versions require revalidation. No CLI open/ensure,
+#            poll, arm, acknowledgement, listener replacement, or feedback read
+#            occurs. Works with firstmate-owned and task-owned receivers without
+#            changing either. The reply file is retained. Success confirms server
+#            acceptance, not browser rendering. Transport/response uncertainty
+#            is reported without retry: inspect the conversation before retrying
+#            manually, because this API has no idempotency key. Unsupported
+#            servers stop here; there is deliberately no poll fallback.
 # classify   Print the lifecycle state a handler should act on: feedback, ended,
 #            waiting, disconnected, missing, or unknown.
 # read       Print a structured presentation of one already-captured result so a
@@ -100,7 +112,7 @@
 # `read` is the presentation command summarized above; keyed intake remains
 # the separate `answers` contract described here.
 #
-# It wraps ONLY the currently published interface, verified against 0.1.45:
+# The listener wraps the published CLI interface, verified against 0.1.45:
 #   Usage: lavish-axi poll <html-file> [--agent-reply "..."]
 # and that command "long-polls indefinitely" server-side. The adapter therefore
 # runs the plain blocking form with no timeout flag, so results arrive as real
@@ -146,12 +158,12 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,/^set -u$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 2; }
 
-apply_session_host() {  # <artifact>
-  local endpoint
-  endpoint=$(perl -MJSON::PP -MCwd=realpath -MEncode=decode,FB_CROAK -e '
+apply_session_host() {  # <artifact> [reply]
+  local endpoint remainder
+  endpoint=$(perl -MJSON::PP -MCwd=realpath -MDigest::SHA=sha256_hex -MEncode=decode,encode,FB_CROAK -e '
     use strict;
     use warnings;
-    my ($path, $artifact) = @ARGV;
+    my ($path, $artifact, $mode) = @ARGV;
     my $real = realpath($artifact) // die "cannot resolve board artifact\n";
     $real = decode("UTF-8", $real, FB_CROAK);
     open my $file, "<", $path or die "cannot read Lavish session store\n";
@@ -173,11 +185,78 @@ apply_session_host() {  # <artifact>
     $host ne "0.0.0.0" && $host ne "::" && $port >= 1 && $port <= 65535
       or die "invalid saved Lavish server address\n";
     print "$host\n$port\n";
-  ' "${LAVISH_AXI_STATE_DIR:-$HOME/.lavish-axi}/state.json" "$1") \
+    if ($mode eq "reply") {
+      my $key = substr(sha256_hex(encode("UTF-8", $real)), 0, 16);
+      ($sessions[0]->{status} // "") =~ /\A(?:open|feedback)\z/
+        or die "reply requires an existing non-ended session\n";
+      ($sessions[0]->{key} // "") eq $key
+        && ($state->{sessions}{$key}{file} // "") eq $real
+        && $url =~ m{/session/$key(?:\?[^\s#]*)?\z}
+        or die "saved session identity does not match artifact\n";
+      print "$key\n";
+    }
+  ' "${LAVISH_AXI_STATE_DIR:-$HOME/.lavish-axi}/state.json" "$1" "${2-}") \
     || die "cannot resolve the board server from its Lavish session: $1"
-  LAVISH_AXI_HOST=${endpoint%$'\n'*}
-  LAVISH_AXI_PORT=${endpoint##*$'\n'}
+  LAVISH_AXI_HOST=${endpoint%%$'\n'*}
+  remainder=${endpoint#*$'\n'}
+  LAVISH_AXI_PORT=${remainder%%$'\n'*}
+  LAVISH_SESSION_KEY=''
+  [ "${2-}" != reply ] || LAVISH_SESSION_KEY=${remainder#*$'\n'}
   export LAVISH_AXI_HOST LAVISH_AXI_PORT
+}
+
+cmd_reply() {
+  [ "$#" -eq 3 ] && [ "$2" = --agent-reply-file ] || usage
+  local artifact=$1 reply_file=$3 host base health payload response cleanup_command
+  command -v curl >/dev/null 2>&1 || die "curl is required for reply-only delivery"
+  [ -f "$reply_file" ] && [ ! -L "$reply_file" ] && [ -r "$reply_file" ] \
+    || die "reply must be a readable regular file: $reply_file"
+  apply_session_host "$artifact" reply
+  host=$LAVISH_AXI_HOST
+  case "$host" in *:*) host="[$host]" ;; esac
+  base="http://$host:$LAVISH_AXI_PORT"
+  # --disable ignores ambient curl config; no redirects, retries, proxy, or CLI
+  # ensureServer call may migrate this request to another server or restart one.
+  health=$(curl --disable --noproxy '*' --silent --show-error --fail \
+    --connect-timeout 3 --max-time 10 "$base/health") \
+    || die "saved Lavish server unavailable; no reply sent"
+  printf '%s' "$health" | perl -MJSON::PP -MCwd=realpath -e '
+    local $/;
+    my $h = eval { decode_json(<STDIN>) };
+    !$@ && ref($h) eq "HASH" && $h->{ok} && ($h->{app} // "") eq "lavish-axi"
+      && ($h->{version} // "") eq "0.1.78"
+      && defined(realpath($h->{state_dir} // ""))
+      && realpath($h->{state_dir}) eq realpath($ARGV[0]) or exit 1;
+  ' "${LAVISH_AXI_STATE_DIR:-$HOME/.lavish-axi}" \
+    || die "reply-only support requires the verified Lavish 0.1.78 server contract and matching state directory; no reply sent"
+  payload=$(mktemp "${TMPDIR:-/tmp}/fm-lavish-reply.XXXXXX") || die "cannot stage reply"
+  printf -v cleanup_command 'rm -f -- %q' "$payload"
+  # shellcheck disable=SC2064 # Capture the private temporary path now.
+  trap "$cleanup_command" EXIT
+  local signal
+  for signal in INT TERM HUP; do
+    # shellcheck disable=SC2064 # Capture the private temporary path and signal now.
+    trap "$cleanup_command; trap - $signal; kill -$signal $$" "$signal"
+  done
+  perl -MJSON::PP -MEncode=decode,FB_CROAK -e '
+    open my $f, "<", $ARGV[0] or die "cannot read reply\n";
+    local $/; my $bytes = <$f>;
+    defined($bytes) && length($bytes) <= 2097000 or die "reply too large\n";
+    my $text = decode("UTF-8", $bytes, FB_CROAK);
+    $text =~ /\S/ or die "reply is empty\n";
+    my $body = encode_json({ text => $text });
+    length($body) <= 2097152 or die "reply JSON exceeds server limit\n";
+    print $body;
+  ' "$reply_file" > "$payload" || die "cannot encode reply; no reply sent"
+  response=$(curl --disable --noproxy '*' --silent --show-error --fail \
+    --connect-timeout 3 --max-time 10 --header 'Content-Type: application/json' \
+    --data-binary "@$payload" "$base/api/$LAVISH_SESSION_KEY/agent-reply") \
+    || die "reply delivery not confirmed (server may lack reply-only support); inspect conversation before any manual retry"
+  printf '%s' "$response" | perl -MJSON::PP -e '
+    local $/; my $r = eval { decode_json(<STDIN>) };
+    !$@ && ref($r) eq "HASH" && ($r->{status} // "") eq "sent" or exit 1;
+  ' || die "reply acceptance not confirmed; inspect conversation before any manual retry"
+  printf 'sent: %s/session/%s\n' "$base" "$LAVISH_SESSION_KEY"
 }
 
 # Canonical identity is physical, not the path string: Lavish itself keys a
@@ -811,6 +890,7 @@ cmd_read() {
 
 case "${1-}" in
   arm)       shift; cmd_arm "$@" ;;
+  reply)     shift; cmd_reply "$@" ;;
   retire)    shift; cmd_retire "$@" ;;
   poll)      shift; cmd_poll "$@" ;;
   source-id) shift; cmd_source_id "$@" ;;

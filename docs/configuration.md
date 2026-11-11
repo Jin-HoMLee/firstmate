@@ -1823,7 +1823,8 @@ Never run the registered blocking source command directly in a conversational tu
 A long-polling external process is registered as a *source* through its adapter, whose header and `--help` own the commands and flags.
 `bin/fm-procevent.sh` owns the generic contract; built-in adapters retain their tracked `bin/fm-procevent-<adapter>.sh` commands, while an explicitly bound external adapter routes through the trusted host contract above.
 
-`bin/fm-procevent-lavish.sh` is the first built-in adapter and wraps only the currently published `lavish-axi poll` interface.
+`bin/fm-procevent-lavish.sh` is the first built-in adapter; its listener wraps the published `lavish-axi poll` interface.
+Its separate reply-only command uses a version-pinned installed server API without changing the receiver; the adapter header owns invocation, compatibility checks, and delivery limits, with current evidence in [process-event verification](verification/process-event-sources.md#lavish-reply-only-server-contract).
 
 **Open the Lavish artifact first**
 

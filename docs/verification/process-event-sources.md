@@ -35,8 +35,43 @@ code: VALIDATION_ERROR   # exit 2
 Exit 2 with `VALIDATION_ERROR` is positive proof the subcommand does not exist, because the word is parsed as a filename.
 Note that `lavish-axi <anything> --help` exits 0 for any argument, including a nonsense subcommand, so a `--help` exit code can never be used as a capability probe.
 
-The adapter requires none of those extra commands or endpoints: delivery uses the published poll shape above.
+Feedback capture requires none of those extra commands or endpoints: it uses the published poll shape above.
 Its separate routing lookup reads the board's saved Lavish session; the adapter header owns that contract.
+
+## Lavish reply-only server contract
+
+Verified on 2026-11-11 on Darwin 25.6.0 with installed `lavish-axi` 0.1.78, Node v24.20.0, and curl 8.7.1.
+The CLI advertises replies only as part of its exclusive blocking poll, not as a standalone command.
+Inspection of the installed server and frontend establishes a separate existing reply route and its chat event consumer; this is an internal server contract, not an advertised stable CLI capability.
+The adapter header owns the exact request, version pin, state-directory and session-identity checks, unsupported failure, and no-retry acceptance boundary.
+Other server versions are deliberately unsupported until revalidated rather than assumed compatible.
+
+Refresh the portable and installed-server evidence with:
+
+```sh
+bash bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 90 tests/fm-procevent-lavish-reply.test.sh
+FM_LAVISH_REPLY_LIVE=1 bash bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 90 tests/fm-procevent-lavish-reply.test.sh
+```
+
+The live form starts only its own isolated loopback server with private state and synthetic artifacts; it never opens a browser or controls an existing service.
+Both serial runs completed with `total=1 failed=0 skipped_gate=0`; measured script durations were 2873ms for the portable fixture and 4911ms for the installed server.
+Selected passing assertions from both forms:
+
+```text
+ok - invalid feedback requests remain rejected without changing session state
+ok - reply-only preserves pending feedback instead of consuming it
+ok - firstmate receiver identity survives same-session reply with no duplicate listener
+ok - task receiver identity survives same-session reply with no duplicate listener
+ok - mismatched saved session identity refuses without side effects
+ok - ended session and invalid reply refuse without reopening or consumption
+ok - unavailable server refuses without starting or replacing a service
+```
+
+The fixtures create genuine firstmate-owned and task-owned registrations, then compare each registration and its independently running HTTP listener before and after the reply.
+The entire persisted session store, including an unrelated session and pending feedback, is compared allowing only the target session's new agent chat entry, chat revision, and update timestamp.
+Portable negative cases additionally cover missing reply-route support, unverified older and newer server versions, another state directory, and a malformed acceptance response without retry or fallback to polling.
+The installed frontend uses a same-origin fetch for feedback submission, so valid synthetic feedback includes its own Origin header; missing and foreign origins still return their exact 403 rejection bodies without changing state.
+These assertions prove server acceptance and independent feedback receipt, not visible rendering in an existing browser or repair of any real conversation.
 
 ## Why an ended Lavish review is terminal
 
@@ -229,7 +264,8 @@ Without this launcher, reconcile would silently fail to start a runner on macOS 
 
 The generic runner and external-adapter path remain domain-neutral and create no endpoint, task metadata, or backlog item, so they affect supported primary harnesses and runtime backends only through the existing `check` and status-signal wake paths they already consume.
 The built-in task-owned Lavish exception validates existing task endpoint metadata and uses the existing steering-inbox backend doorbell to deliver a capture directly to that worker; it creates no new endpoint or backend protocol.
-Session-derived routing happens only inside the shared Lavish poll adapter, so it changes no harness or session-provider launch, registration, steering, or lifecycle interface.
+Session-derived routing happens only inside the shared Lavish poll and reply adapter, so it changes no harness or session-provider launch, registration, steering, or lifecycle interface.
+The reply-only command uses no harness or runtime-backend dispatch at all, and the independent receiver retains the same registration and listener under both ownership types.
 Built-in adapters extend the runner through `bin/fm-procevent-<adapter>.sh`; the `when` adapter also uses the runner library's locked registration publisher so its private trust state and source registration are serialized under one source boundary.
 Explicit external adapters instead use the single-capability contract in [`docs/extension-bindings.md`](../extension-bindings.md), with no filename discovery or package-supplied argv.
 An adapter's `terminal` command is optional and defaults to keeping the source armed.
