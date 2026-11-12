@@ -26,6 +26,7 @@
   "readmeSetupTargets": [
     "docs/configuration.md",
     "docs/wedge-alarm.md",
+    "docs/telegram.md",
     "docs/tmux-backend.md",
     "docs/herdr-backend.md",
     "docs/zellij-backend.md",
@@ -108,6 +109,10 @@
     }
   ],
   "surfaces": [
+    {
+      "path": "docs/telegram.md",
+      "audience": "operator-current"
+    },
     {
       "path": ".agents/skills/afk/SKILL.md",
       "audience": "agent-runtime"
