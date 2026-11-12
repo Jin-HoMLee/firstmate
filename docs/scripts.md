@@ -156,6 +156,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-public-followup.sh`  | Brief, reconcile, and deliver typed public commitments, surface refusals, then rechain or retire retained loops |
 | `fm-public-followup-emit.sh` | Validate and report one typed terminal work result into its owning home, or stage it when that home is remote |
 | `fm-public-followup-collect.sh` | Read and retire the typed terminal results a remote work home staged for the home that owes the public reply |
+| `fm-telegram.py`         | Opt-in, locally approved private Telegram text transport to the existing inbox ([telegram.md](telegram.md)) |
 | `fm-inbox.sh`            | The captain's out-of-band capture surface: queue a note (optionally idempotent by request id), announce or repair its wake, record a durable primary reply, and emit bounded receipts and primary-readiness JSON |
 | `fm-mail.sh`             | General-purpose mail plane: read unseen IMAP mail, send one SMTP message, or surface new mail as a `check` wake via `poll` (configuration in the home's gitignored `.env`) |
 | `fm-mail.py`             | The IMAP/SMTP engine behind `fm-mail.sh` |

@@ -2190,6 +2190,11 @@ The runner proves exactly one durability boundary: output that reached the runne
 
 `docs/verification/process-event-sources.md` holds the measurements and `.agents/skills/process-event-sources/SKILL.md` owns the handling procedure.
 
+## Private Telegram chat
+
+[`telegram.md`](telegram.md) owns the optional private-chat setup, local numeric identity approval, secret handling and delivery limits for `bin/fm-telegram.py`.
+It is default-off and reuses the existing inbox without changing worker dispatch or approval authority.
+
 ## Spoken interface and captain inbox (config/voice-*, config/inbox-*)
 
 The spoken interface in [`docs/voice-relay.md`](voice-relay.md) and the model-backed subcommands of `bin/fm-inbox.sh` reach a paid API in a named account, so no region, model id or AWS profile is shipped as a tracked default.
