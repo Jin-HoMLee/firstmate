@@ -389,6 +389,25 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   pass "fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree"
 }
 
+test_relaunch_resumes_same_task_without_clearing_captain_hold() {
+  local dir out rc
+  dir=$(new_case captain-held rl-held)
+  add_ship_task "$dir" rl-held claude
+  seed_backlog "$dir" rl-held in_flight
+  tasks-axi hold rl-held --reason "personal answers pending" --kind captain \
+    --file "$dir/home/data/backlog.md" >/dev/null
+
+  out=$(run_control "$dir" rl-held relaunch --note "resume the existing task"); rc=$?
+  expect_code 0 "$rc" "a captain-held existing task should safely relaunch"$'\n'"$out"
+  [ "$(backlog_state "$dir" rl-held)" = in_flight ] \
+    || fail "relaunch changed the held task's backlog state to $(backlog_state "$dir" rl-held)"
+  [ "$(tasks-axi show rl-held --file "$dir/home/data/backlog.md" | sed -n 's/^  held: *//p' | head -1)" = yes ] \
+    || fail "relaunch cleared the captain's hold"
+  [ "$(tasks-axi show rl-held --file "$dir/home/data/backlog.md" | sed -n 's/^  hold_kind: *//p' | head -1)" = captain ] \
+    || fail "relaunch changed the hold owner"
+  pass "fm-control relaunch: a same-task recovery preserves its captain hold"
+}
+
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text() {
   local dir out rc
   dir=$(new_case pending-exit rl43)
@@ -2386,6 +2405,7 @@ test_relaunch_moves_a_drifted_item_back_in_flight() {
 }
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
+test_relaunch_resumes_same_task_without_clearing_captain_hold
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
 test_relaunch_from_linked_home_preserves_recorded_worktree

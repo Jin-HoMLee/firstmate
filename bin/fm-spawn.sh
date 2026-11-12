@@ -3398,7 +3398,16 @@ if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
     exit 1
   fi
   spawn_preflight_actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
-  if [ "$spawn_preflight_actor" = branch ] && fm_lease_away_relocated; then
+  if [ "$RELAUNCH" -eq 1 ]; then
+    # A captain-held In-flight row may resume only through this existing task's
+    # already-validated relaunch record. Keep the hold in place; fresh dispatch,
+    # blocked rows, and holds owned by other mechanisms remain ineligible.
+    if [ "$BACKLOG_ROW_STATE" != "in_flight yes no" ] \
+      || [ "$FM_BACKLOG_ROW_HOLD_KIND" != captain ]; then
+      echo "error: relaunch of $ID requires its existing In-flight task to be held only by a captain decision; refusing in state $BACKLOG_ROW_STATE" >&2
+      exit 1
+    fi
+  elif [ "$spawn_preflight_actor" = branch ] && fm_lease_away_relocated; then
     if [ "$BACKLOG_ROW_STATE" != "queued no no" ]; then
       echo "error: spawn refused - the supervision branch under the away-posture record may dispatch only queued unblocked work (already queued, or filed by the branch from the captain's away words); task $ID has no dispatchable backlog item in this home" >&2
       exit 1
@@ -4837,7 +4846,9 @@ fi
 # serialized exactly as before. The call itself is deferred to the final commit
 # point below so every earlier launch-delivery failure remains unwindable.
 spawn_commit_backlog_transition() {
-  [ "$BACKLOG_TRANSITION" = 1 ] || return 0
+  # Relaunch republishes the same task record; it must never repeat the fresh
+  # dispatch transition, which would clear or reject an active captain hold.
+  [ "$RELAUNCH" = 0 ] && [ "$BACKLOG_TRANSITION" = 1 ] || return 0
   fm_backlog_atomic_transition dispatch "$STATE/$ID.meta" "$DATA" "$ID" "$STATE"
 }
 
