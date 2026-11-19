@@ -1382,10 +1382,14 @@ Startup/update never fast-forwards, resets, fetches into, or runs maintenance ho
 A declared but unlaunched binding is skipped, not activated by a sweep.
 After a shared source change, startup reports the need for the existing update/restart owner instead of pretending that an AGENTS-only reread refreshed native wiring.
 The update owner refreshes action bindings from the shared code with each target's own `FM_HOME`, and the normal correlated persistence/restart contract remains required before replacement.
-Shared-code home retirement is unsupported and refused, including forced descendant cleanup; retain the homes and their old histories in place.
+An existing contribution check is refreshed through `fm-contributions.sh arm --refresh-existing` and the authenticated registration owner even when no contribution rows remain or the source HEAD is already current.
+That source-only refresh preserves its serialized private data/config selectors and numeric polling/reply policy; it does not inherit the updating parent's private selectors or settings.
+Untrusted checks, unknown custom bodies, or mismatched home/state/source bindings remain unchanged and keep that target out of the update's restart set; no arbitrary check is automatically re-trusted.
+Shared-code home retirement is unsupported and refused, including forced descendant cleanup; retain the homes, private project Git administration, external-copy dependencies and unresolved custody records in place.
 
 [`tests/fm-shared-code.test.sh`](../tests/fm-shared-code.test.sh) executes rendered command suffixes with shell-only fake Pi executables for four separate homes.
-The existing [replacement](../tests/fm-control-relaunch.test.sh), [sync](../tests/fm-secondmate-sync.test.sh), [update](../tests/fm-update.test.sh), and [preservation](../tests/fm-secondmate-safety.test.sh) suites exercise their corresponding owners.
+It also checks retained in-home project Git administration, nine external copies, an unmerged index, private queues and unresolved dual-claim records without repairing or relocating them.
+The existing [replacement](../tests/fm-control-relaunch.test.sh), [sync](../tests/fm-secondmate-sync.test.sh), [update](../tests/fm-update.test.sh), [consumer registration](../tests/fm-contributions-arm.test.sh), and [preservation](../tests/fm-secondmate-safety.test.sh) suites exercise their corresponding owners.
 These are synthetic support tests, **not live native-runtime, backend, safeguard-equivalence, backup-completeness, or primary-handoff acceptance evidence**.
 
 ### Remote routes and validation

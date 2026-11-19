@@ -202,6 +202,68 @@ test_four_homes_share_rendered_code_not_private_state_or_history() {
   pass 'four retained homes render/execute isolated Pi-family commands from one code root without syncing old history'
 }
 
+test_retained_project_admin_and_unresolved_custody_are_not_relocated() {
+  local w id i project external common before_worktrees before_index before_config before_unmerged
+  local before_custody after_custody base ours theirs file
+  local -a custody_files
+  w=$(new_shared_world 'retained project administration')
+  for id in sm1 sm2; do
+    add_retained_home "$w" "$id"
+    printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$w/parent" > "$w/$id/.fm-secondmate-parent"
+    mkdir -p "$w/$id/state/kept.inbox/handled"
+    printf 'arriving correlation and payload\n' > "$w/$id/state/kept.inbox/001.msg"
+    printf 'previously handled payload\n' > "$w/$id/state/kept.inbox/handled/000.msg"
+  done
+  project="$w/sm1/projects/private-project"
+  git init -q -b main "$project"
+  printf 'private project work\n' > "$project/work.txt"
+  git -C "$project" add -A
+  git -C "$project" commit -qm 'synthetic retained project'
+  for i in {1..9}; do
+    git -C "$project" worktree add -q --detach "$w/external-$i" HEAD
+  done
+  printf 'unfinished private change\n' >> "$project/work.txt"
+  external="$w/external-1"
+  base=$(printf 'base\n' | git -C "$external" hash-object -w --stdin)
+  ours=$(printf 'ours\n' | git -C "$external" hash-object -w --stdin)
+  theirs=$(printf 'theirs\n' | git -C "$external" hash-object -w --stdin)
+  printf '100644 %s 1\tconflict.txt\n100644 %s 2\tconflict.txt\n100644 %s 3\tconflict.txt\n' "$base" "$ours" "$theirs" \
+    | git -C "$external" update-index --index-info
+  before_unmerged=$(git -C "$external" ls-files --stage)
+  before_index=$(git hash-object "$(git -C "$external" rev-parse --git-path index)")
+  before_config=$(git hash-object "$project/.git/config")
+  before_worktrees=$(git -C "$project" worktree list --porcelain)
+  # Two intentionally contradictory private records point at a separate mock
+  # source copy. Launching from common code must not resolve either claim.
+  git -C "$w/code" worktree add -q -b mock-actual "$w/ambiguous-copy" HEAD
+  printf 'kind=scout\nworktree=%s\nbranch=mock-recovery\n' "$w/ambiguous-copy" > "$w/sm1/state/preserved-claim.meta"
+  printf 'kind=ship\nworktree=%s\nbranch=mock-actual\n' "$w/ambiguous-copy" > "$w/sm2/state/preserved-claim.meta"
+  custody_files=()
+  for id in sm1 sm2; do
+    custody_files+=("$w/$id/.fm-secondmate-home" "$w/$id/.fm-secondmate-parent"
+      "$w/$id/state/preserved-claim.meta" "$w/$id/state/kept.inbox/001.msg"
+      "$w/$id/state/kept.inbox/handled/000.msg")
+  done
+  before_custody=$(for file in "${custody_files[@]}"; do git hash-object "$file"; done)
+  for id in sm1 sm2; do
+    shared_spawn "$w" "$id" pi > "$w/spawn-$id.log" 2>&1 \
+      || fail "shared spawn with retained administration failed: $(cat "$w/spawn-$id.log")"
+  done
+  for i in {1..9}; do
+    common=$(git -C "$w/external-$i" rev-parse --git-common-dir)
+    assert_equals "$project/.git" "$common" 'external copy still depends on retained in-home Git administration'
+  done
+  assert_equals "$before_worktrees" "$(git -C "$project" worktree list --porcelain)" 'all nine external copies remain registered in place'
+  assert_equals "$before_index" "$(git hash-object "$(git -C "$external" rev-parse --git-path index)")" 'unmerged index bytes preserved'
+  assert_equals "$before_unmerged" "$(git -C "$external" ls-files --stage)" 'unmerged stages are not repaired or discarded'
+  assert_equals "$before_config" "$(git hash-object "$project/.git/config")" 'private project Git configuration unchanged'
+  assert_grep 'unfinished private change' "$project/work.txt" 'dirty private project content stays in place'
+  after_custody=$(for file in "${custody_files[@]}"; do git hash-object "$file"; done)
+  assert_equals "$before_custody" "$after_custody" 'identity, parent binding, queued/history payloads and both claims remain byte-identical'
+  assert_equals mock-actual "$(git -C "$w/ambiguous-copy" branch --show-current)" 'actual branch is not renamed to resolve a claim'
+  pass 'shared-code selection preserves nested project administration, nine external copies, an unmerged index and unresolved private custody'
+}
+
 test_missing_native_source_refuses_before_endpoint_creation() {
   local w rc=0
   w=$(new_shared_world missing-extension)
@@ -220,4 +282,5 @@ test_binding_is_sticky_and_recorded_recovery_is_scoped
 test_binding_metadata_is_unambiguous
 test_native_axes_are_explicitly_bounded
 test_four_homes_share_rendered_code_not_private_state_or_history
+test_retained_project_admin_and_unresolved_custody_are_not_relocated
 test_missing_native_source_refuses_before_endpoint_creation

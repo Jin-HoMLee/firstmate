@@ -90,6 +90,10 @@
 # activated local shared-code route), with FM_HOME still selecting that home.
 # It calls rebind-all to republish those bindings against the new
 # bytes; a failure there is swallowed rather than failing the update.
+# An activated shared-code home also refreshes an existing contribution check
+# through its producer/registration owner, even without current contribution
+# rows or a source advance. Untrusted check artifacts stay unchanged and keep
+# that home out of the restart set; no arbitrary check is re-trusted here.
 #
 # Usage: fm-update.sh [--help]
 set -eu
@@ -256,13 +260,26 @@ fm_ff_after_secondmate_settled() {  # <id> <home> <window> <status> <instr>
   # routes use their own source; shared-code routes use the validated root,
   # never a leaked outer override or the retained old source.
   local rebind_root=${SECONDMATE_LOCAL_CODE_ROOT:-$2} rebind_needed=0 launch_head
+  local -a home_env
+  home_env=("FM_HOME=$2" "FM_ROOT_OVERRIDE=$rebind_root")
   [ "${4:-}" != updated ] || rebind_needed=1
   if [ -n "${SECONDMATE_LOCAL_CODE_ROOT:-}" ]; then
+    # A parent-side state/data override must not retarget a child's consumers.
+    home_env+=(FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PROJECTS_OVERRIDE=)
     launch_head=$(secondmate_code_head_from_meta "$STATE/$1.meta") || launch_head=
     [ "$launch_head" = "$(git -C "$rebind_root" rev-parse HEAD)" ] || rebind_needed=1
+    if [ -e "$2/state/contributions.check.sh" ] || [ -L "$2/state/contributions.check.sh" ] \
+      || [ -e "$2/state/contributions.check-trust" ] || [ -L "$2/state/contributions.check-trust" ]; then
+      if [ ! -x "$rebind_root/bin/fm-contributions.sh" ] \
+        || ! env "${home_env[@]}" "$rebind_root/bin/fm-contributions.sh" arm --refresh-existing; then
+        FF_STATUS=skipped
+        echo "secondmate $1: skipped: existing contribution check could not refresh from shared source; retained artifacts preserved"
+        return 0
+      fi
+    fi
   fi
   if [ "$rebind_needed" = 1 ] && [ -x "$rebind_root/bin/fm-procevent-when.sh" ]; then
-    FM_HOME="$2" FM_ROOT_OVERRIDE="$rebind_root" "$rebind_root/bin/fm-procevent-when.sh" rebind-all || true
+    env "${home_env[@]}" "$rebind_root/bin/fm-procevent-when.sh" rebind-all || true
   fi
   claim_settled_secondmate "$1"
 }

@@ -692,14 +692,24 @@ test_self_update_source_rewrite_is_skipped() {
 }
 
 test_shared_code_update_rebinds_from_code_not_retained_home() {
-  local w old before out
+  local w old before out entry check_before trust_before source_head source_hook_before
   w=$(new_world shared-code-update)
+  # Individual source-file links retain each fixture code root's script path;
+  # a whole-bin symlink would hide the very old-source dependency under test.
+  source_hook_before=$(git hash-object "$ROOT/bin/fm-procevent-when.sh")
+  for entry in "$ROOT/bin/"*; do
+    # Writable mock executables must be fixture files, never source aliases.
+    case "${entry##*/}" in fm-procevent-when.sh) continue ;; esac
+    [ -e "$w/seed/bin/${entry##*/}" ] || ln -s "$entry" "$w/seed/bin/${entry##*/}"
+  done
   mkdir -p "$w/seed/.pi/extensions"
   : > "$w/seed/.pi/extensions/fm-primary-pi-watch.ts"
   : > "$w/seed/.pi/extensions/fm-primary-turnend-guard.ts"
   cat > "$w/seed/bin/fm-procevent-when.sh" <<'SH'
 #!/usr/bin/env bash
-printf '%s|%s|%s\n' "$FM_HOME" "$FM_ROOT_OVERRIDE" "$*" >> "$FM_TEST_REBIND_LOG"
+printf '%s|%s|%s|%s|%s|%s|%s\n' "$FM_HOME" "$FM_ROOT_OVERRIDE" "$*" \
+  "${FM_STATE_OVERRIDE:-$FM_HOME/state}" "${FM_DATA_OVERRIDE:-$FM_HOME/data}" \
+  "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" "${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}" >> "$FM_TEST_REBIND_LOG"
 SH
   chmod +x "$w/seed/bin/fm-procevent-when.sh"
   git -C "$w/seed" add -A
@@ -719,6 +729,11 @@ exit 88
 SH
   printf 'unfinished old instructions\n' >> "$w/shared/AGENTS.md"
   before=$(git -C "$w/shared" diff HEAD)
+  FM_HOME="$w/shared" FM_ROOT_OVERRIDE="$w/shared" FM_STATE_OVERRIDE="$w/shared/state" \
+    FM_DATA_OVERRIDE="$w/shared/data" FM_CONFIG_OVERRIDE="$w/shared/config" \
+    FM_CONTRIBUTIONS_BUDGET=7 FM_CONTRIBUTIONS_REPLY_AGE=123 \
+    "$w/shared/bin/fm-contributions.sh" arm >/dev/null || fail 'old-source consumer fixture could not register'
+  assert_grep "exec $w/shared/bin/fm-contributions.sh poll" "$w/shared/state/contributions.check.sh" 'fixture really selects retained old code'
   # Runtime evidence is simulated, never a real endpoint.
   cat > "$w/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
@@ -729,15 +744,52 @@ esac
 SH
   chmod +x "$w/fakebin/tmux"
   bump_origin "$w" bin
-  out=$(FM_TEST_REBIND_LOG="$w/rebind.log" run_update "$w")
+  out=$(FM_TEST_REBIND_LOG="$w/rebind.log" FM_STATE_OVERRIDE="$w/home/state" \
+    FM_DATA_OVERRIDE="$w/home/data" FM_CONFIG_OVERRIDE="$w/home/config" \
+    FM_PROJECTS_OVERRIDE="$w/home/projects" run_update "$w")
   assert_contains "$out" 'shared code current; native refresh belongs to the restart owner' 'source settlement is not a native reload claim'
   assert_contains "$out" 'restart-secondmates: fm-shared' 'existing owner receives shared-code restart eligibility'
-  assert_grep "$w/shared|$w/main|rebind-all" "$w/rebind.log" 'child binding refresh executes shared source with the child home'
+  assert_grep "$w/shared|$w/main|rebind-all|$w/shared/state|$w/shared/data|$w/shared/config|$w/shared/projects" \
+    "$w/rebind.log" 'parent private overrides cannot retarget child source consumers'
+  assert_grep "exec $w/main/bin/fm-contributions.sh poll" "$w/shared/state/contributions.check.sh" 'registered consumer now selects common code'
+  assert_grep 'export FM_CONTRIBUTIONS_BUDGET=7' "$w/shared/state/contributions.check.sh" 'source refresh preserves private polling policy'
+  assert_grep 'export FM_CONTRIBUTIONS_REPLY_AGE=123' "$w/shared/state/contributions.check.sh" 'source refresh preserves private reply policy'
+  [ ! -e "$w/home/state/contributions.check.sh" ] || fail 'child consumer was written into parent state'
   assert_no_grep old-source-invoked "$w/rebind.log" 'retained old hook is never executed'
   assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" 'update leaves retained history in place'
   assert_equals "$before" "$(git -C "$w/shared" diff HEAD)" 'update preserves unfinished old work'
   assert_grep "code_head=$old" "$w/home/state/shared.meta" 'planning restart does not fabricate a new native launch'
-  pass 'shared-code update uses existing rebind/restart owners without updating or executing retained old home source'
+
+  # Simulate a separately recorded new launch ONLY in this fixture, then restore
+  # a trusted old-source consumer. No source advance is required to discover it.
+  source_head=$(git -C "$w/main" rev-parse HEAD)
+  awk -v head="$source_head" '/^code_head=/{print "code_head=" head;next}{print}' \
+    "$w/home/state/shared.meta" > "$w/fresh-launch.meta"
+  mv "$w/fresh-launch.meta" "$w/home/state/shared.meta"
+  FM_HOME="$w/shared" FM_ROOT_OVERRIDE="$w/shared" FM_STATE_OVERRIDE="$w/shared/state" \
+    FM_DATA_OVERRIDE="$w/shared/data" FM_CONFIG_OVERRIDE="$w/shared/config" \
+    "$w/shared/bin/fm-contributions.sh" arm >/dev/null || fail 'could not recreate existing old-source fixture'
+  out=$(FM_TEST_REBIND_LOG="$w/rebind.log" run_update "$w")
+  assert_grep "exec $w/main/bin/fm-contributions.sh poll" "$w/shared/state/contributions.check.sh" 'already-current launch still refreshes an old-source consumer'
+  assert_contains "$out" 'restart-secondmates: fm-shared' 'existing restart classification is retained'
+
+  # An intentionally registered custom body is not overwritten or silently
+  # reinterpreted. The existing source conflict keeps this target out of restart.
+  printf '# private custom suffix\n' >> "$w/shared/state/contributions.check.sh"
+  FM_HOME="$w/shared" FM_STATE_OVERRIDE="$w/shared/state" \
+    "$ROOT/bin/fm-check-register.sh" contributions >/dev/null || fail 'custom fixture registration failed'
+  check_before=$(git hash-object "$w/shared/state/contributions.check.sh")
+  trust_before=$(git hash-object "$w/shared/state/contributions.check-trust")
+  out=$(FM_TEST_REBIND_LOG="$w/rebind.log" run_update "$w")
+  assert_contains "$out" 'existing contribution check could not refresh from shared source; retained artifacts preserved' 'unsupported custom source conflict is explicit'
+  assert_contains "$out" 'restart-secondmates: none' 'consumer conflict is not treated as settled for replacement'
+  assert_equals "$check_before" "$(git hash-object "$w/shared/state/contributions.check.sh")" 'custom check bytes unchanged'
+  assert_equals "$trust_before" "$(git hash-object "$w/shared/state/contributions.check-trust")" 'custom trust bytes unchanged'
+  assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" 'repeated refresh never updates retained source history'
+  assert_equals "$before" "$(git -C "$w/shared" diff HEAD)" 'repeated refresh preserves unfinished source work'
+  assert_equals "$source_hook_before" "$(git hash-object "$ROOT/bin/fm-procevent-when.sh")" 'fixture hook writes never reach production source'
+  pass 'shared-code update refreshes existing consumers through their owners, preserving private policy and refusing custom conflicts'
+
 }
 
 test_shared_code_update_rebinds_from_code_not_retained_home
