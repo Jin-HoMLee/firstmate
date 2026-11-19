@@ -24,6 +24,8 @@
 #   - composition: the script invokes the real fm-lock.sh/fm-bootstrap.sh/
 #     fm-wake-drain.sh (their real, distinctive output appears verbatim), it
 #     does not reimplement their logic
+#   - immediate private-safe entry/exit timing at the two bootstrap child-owner
+#     boundaries, preserving captured output, path-specific flags and runtime bound
 #   - the deferred startup stage: slow network and inactive current-state reads
 #     do not delay the digest, the work still runs and lands durable findings, a
 #     network result surfaces exactly once (inline or as a wake, never both), a
@@ -1766,6 +1768,181 @@ EOF
   pass "session start seeds an existing outcome store's absent display tail copy while away, moving no marker"
 }
 
+# --- observable bootstrap child-owner boundaries -----------------------------
+
+# Copy the public entry point and stub only child owners in a synthetic home.
+# Other libraries remain real; neither backend lifecycle nor network is invoked.
+make_phase_timing_world() {  # <root> <home> <fakebin>
+  local root=$1 home=$2 fakebin=$3 script name
+  mkdir -p "$root/bin"
+  for script in "$ROOT"/bin/*; do
+    name=${script##*/}
+    case "$name" in
+      fm-session-start.sh|fm-lock.sh|fm-herdr-session-cleanup.sh|fm-bootstrap.sh|\
+      fm-home-summary-refresh.sh|fm-startup-network.sh|fm-wake-drain.sh|fm-supervision-instructions.sh) ;;
+      *) ln -s "$script" "$root/bin/$name" ;;
+    esac
+  done
+  cp "$ROOT/bin/fm-session-start.sh" "$root/bin/fm-session-start.sh"
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  for name in fm-home-summary-refresh.sh fm-startup-network.sh fm-wake-drain.sh fm-supervision-instructions.sh; do
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$root/bin/$name"
+    chmod +x "$root/bin/$name"
+  done
+  cat > "$root/bin/fm-lock.sh" <<'SH'
+#!/usr/bin/env bash
+[ "${FM_PHASE_TEST_LOCK_REFUSE:-0}" != 1 ] || exit 1
+printf '4242\n' > "$FM_HOME/state/.lock"
+printf 'synthetic lock acquired\n'
+SH
+  chmod +x "$root/bin/fm-lock.sh"
+  for name in fm-herdr-session-cleanup.sh fm-bootstrap.sh; do
+    cat > "$root/bin/$name" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${0##*/}" in
+  fm-herdr-session-cleanup.sh) phase=projection-cleanup; rc=17 ;;
+  fm-bootstrap.sh) phase=local-bootstrap; rc=23 ;;
+esac
+printf '%s\n' "$phase" >> "$FM_PHASE_TEST_DIR/calls"
+printf '%s|%s|%s|%s\n' "$phase" "${FM_BOOTSTRAP_NETWORK:-unset}" \
+  "${FM_BOOTSTRAP_DETECT_ONLY:-0}" "${FM_BOOTSTRAP_LOCKED:-0}" >> "$FM_PHASE_TEST_DIR/flags"
+if (: >&3) 2>/dev/null; then : > "$FM_PHASE_TEST_DIR/leaked-fd"; fi
+printf 'child stdout %s %s\n' "$phase" "$FM_PHASE_TEST_SECRET"
+printf 'child stderr %s %s\n' "$phase" "$FM_PHASE_TEST_SECRET" >&2
+: > "$FM_PHASE_TEST_DIR/entered-$phase"
+while [ ! -e "$FM_PHASE_TEST_DIR/release-$phase" ]; do sleep 0.1; done
+exit "$rc"
+SH
+    chmod +x "$root/bin/$name"
+  done
+  printf 'synthetic-private-config\n' > "$home/config/crew-harness"
+}
+
+phase_fixture_entered() {  # <world> <phase>
+  local world=$1 phase=$2 ticks=0
+  while [ ! -e "$world/entered-$phase" ] && [ "$ticks" -lt 200 ]; do
+    sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  [ -e "$world/entered-$phase" ]
+}
+
+test_bootstrap_phase_markers_stream_without_child_output() {
+  local rec root home fakebin world out pid cleanup_seen=0 bootstrap_seen=0 leaked=0 markers
+  local SESSION_START
+  rec=$(new_world phase-stream)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  world=${root%/root}
+  out="$world/digest.out"
+  make_phase_timing_world "$root" "$home" "$fakebin"
+  SESSION_START="$root/bin/fm-session-start.sh"
+  FM_PHASE_TEST_DIR="$world" FM_PHASE_TEST_SECRET=private-output-sentinel \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH" > "$out" 2> "$world/digest.err" &
+  pid=$!
+  if phase_fixture_entered "$world" projection-cleanup \
+    && grep -Eq '^SESSION_START_PHASE: projection-cleanup entry elapsed=[0-9]+s$' "$out"; then
+    cleanup_seen=1
+  fi
+  grep -q 'private-output-sentinel' "$out" && leaked=1
+  : > "$world/release-projection-cleanup"
+  if phase_fixture_entered "$world" local-bootstrap \
+    && grep -Eq '^SESSION_START_PHASE: local-bootstrap entry elapsed=[0-9]+s$' "$out" \
+    && grep -Eq '^SESSION_START_PHASE: projection-cleanup exit elapsed=[0-9]+s$' "$out"; then
+    bootstrap_seen=1
+  fi
+  grep -q 'private-output-sentinel' "$out" && leaked=1
+  : > "$world/release-local-bootstrap"
+  wait "$pid" || fail "synthetic session start failed"
+
+  [ "$cleanup_seen" -eq 1 ] || fail "cleanup entry was buffered until the child returned"
+  [ "$bootstrap_seen" -eq 1 ] || fail "cleanup exit/bootstrap entry did not stream while bootstrap was waiting"
+  [ "$leaked" -eq 0 ] || fail "child output escaped its existing section capture"
+  assert_absent "$world/leaked-fd" "a child inherited the diagnostic bypass descriptor"
+  markers=$(grep '^SESSION_START_PHASE:' "$out")
+  printf '%s\n' "$markers" | awk '
+    BEGIN { phase[1]="projection-cleanup entry"; phase[2]="projection-cleanup exit";
+            phase[3]="local-bootstrap entry"; phase[4]="local-bootstrap exit" }
+    { n++; expected="^SESSION_START_PHASE: " phase[n] " elapsed=[0-9]+s$";
+      if ($0 !~ expected) bad=1;
+      elapsed=$NF; sub(/^elapsed=/,"",elapsed); sub(/s$/,"",elapsed);
+      if (n > 1 && elapsed+0 < previous) bad=1; previous=elapsed+0 }
+    END { exit !(n == 4 && !bad) }
+  ' || fail "diagnostics changed order, leaked nonliteral data, or reported decreasing elapsed times"
+  assert_equals "$(printf 'projection-cleanup\nlocal-bootstrap')" "$(cat "$world/calls")" \
+    "child owners did not run once each in their original order"
+  assert_contains "$(cat "$world/flags")" 'local-bootstrap|skip|0|0' "normal bootstrap flags changed"
+  assert_contains "$(cat "$out")" 'child stdout projection-cleanup private-output-sentinel' "cleanup stdout lost"
+  assert_contains "$(cat "$out")" 'child stderr local-bootstrap private-output-sentinel' "bootstrap stderr lost"
+  assert_contains "$(cat "$out")" 'NEXT STEP' "nonzero child exits changed ordinary digest continuation"
+  pass "bootstrap phase entry/exit streams immediately with fixed private-safe labels and unchanged captured child behavior"
+}
+
+test_bootstrap_phase_markers_respect_read_only_and_reemit() {
+  local mode rec root home fakebin world out markers
+  local SESSION_START
+  for mode in read-only reemit; do
+    rec=$(new_world "phase-$mode")
+    IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+    world=${root%/root}
+    make_phase_timing_world "$root" "$home" "$fakebin"
+    SESSION_START="$root/bin/fm-session-start.sh"
+    : > "$world/release-local-bootstrap"
+    if [ "$mode" = read-only ]; then
+      out=$(FM_PHASE_TEST_DIR="$world" FM_PHASE_TEST_SECRET=private-output-sentinel FM_PHASE_TEST_LOCK_REFUSE=1 \
+        run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+      assert_contains "$(cat "$world/flags")" 'local-bootstrap|skip|1|0' "read-only bootstrap flags changed"
+    else
+      out=$(FM_PHASE_TEST_DIR="$world" FM_PHASE_TEST_SECRET=private-output-sentinel \
+        run_named_harness_session_start claude "$home" "$root" "$fakebin:$BASE_PATH" --reemit)
+      assert_contains "$(cat "$world/flags")" 'local-bootstrap|skip|1|1' "re-emit bootstrap flags changed"
+    fi
+    markers=$(printf '%s\n' "$out" | grep '^SESSION_START_PHASE:')
+    assert_equals 2 "$(printf '%s\n' "$markers" | wc -l | tr -d ' ')" "a skipped owner received timing markers"
+    assert_not_contains "$markers" 'projection-cleanup' "cleanup was instrumented despite being skipped"
+    assert_equals local-bootstrap "$(cat "$world/calls")" "a skipped cleanup owner was invoked"
+    assert_contains "$out" 'NEXT STEP' "$mode digest did not finish"
+  done
+  pass "read-only and re-emit paths time only the existing local detection child and preserve its flags"
+}
+
+test_bootstrap_phase_markers_survive_the_existing_runtime_bound() {
+  local phase rec root home fakebin world out markers status
+  local SESSION_START
+  for phase in projection-cleanup local-bootstrap; do
+    rec=$(new_world "phase-bound-$phase")
+    IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+    world=${root%/root}
+    make_phase_timing_world "$root" "$home" "$fakebin"
+    SESSION_START="$root/bin/fm-session-start.sh"
+    [ "$phase" != local-bootstrap ] || : > "$world/release-projection-cleanup"
+    status=0
+    out=$(FM_PHASE_TEST_DIR="$world" FM_PHASE_TEST_SECRET=private-output-sentinel FM_SESSION_START_TIMEOUT=5 \
+      run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+    expect_code 0 "$status" "the reporting owner's timeout exit contract changed"
+    markers=$(printf '%s\n' "$out" | grep '^SESSION_START_PHASE:')
+    assert_contains "$markers" "SESSION_START_PHASE: $phase entry elapsed=" "unfinished boundary entry was lost"
+    assert_not_contains "$markers" "SESSION_START_PHASE: $phase exit" "unfinished boundary falsely reported an exit"
+    assert_not_contains "$out" private-output-sentinel "timed-out child payload escaped the capture"
+    assert_contains "$out" 'STARTUP TRUNCATED - SESSION START HIT ITS 5s RUNTIME BOUND' "existing requested bound changed"
+    assert_contains "$out" 'stopped during the "bootstrap" stage' "the existing truncation stage changed"
+    assert_not_contains "$out" 'NEXT STEP' "timed-out digest claimed completion"
+    assert_absent "$home/state/.session-start-complete" "timed-out digest recorded completion"
+    if [ "$phase" = projection-cleanup ]; then
+      assert_equals projection-cleanup "$(cat "$world/calls")" "bootstrap ran before cleanup returned"
+      assert_not_contains "$markers" local-bootstrap "bootstrap entry appeared before cleanup returned"
+    fi
+  done
+  pass "each unfinished owner retains its streamed entry under the unchanged aggregate runtime bound"
+}
+
 # --- deferred network stage -------------------------------------------------
 
 # install_slow_gh <fakebin> <seconds>: one external-network call the digest used
@@ -3124,6 +3301,9 @@ test_endpoint_bound_rejects_padded_zero
 test_perl_timeout_fallback_reports_signal_death_nonzero
 test_abnormal_digest_death_banners_and_exits_zero
 test_composition_invokes_real_scripts
+test_bootstrap_phase_markers_stream_without_child_output
+test_bootstrap_phase_markers_respect_read_only_and_reemit
+test_bootstrap_phase_markers_survive_the_existing_runtime_bound
 test_branch_outcome_replay_respects_captain_barrier_and_lease_sweep
 test_non_pi_session_start_leaves_branch_state_untouched
 test_session_start_seeds_the_outcome_display_tail_while_away

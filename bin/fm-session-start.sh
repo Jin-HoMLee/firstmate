@@ -112,6 +112,17 @@
 # The LOCK/BOOTSTRAP/WAKE-QUEUE safety preamble keeps its order: it establishes
 # mutation authority and this turn's work queue before anything else is read.
 #
+# Bootstrap child-owner timing is streamed immediately on digest stdout, outside
+# the captured child output, as:
+#   SESSION_START_PHASE: <phase> <entry|exit> elapsed=<seconds>s
+# The only phase labels are projection-cleanup and local-bootstrap. Cleanup is
+# absent on read-only/re-emit paths, as before. Elapsed seconds use Bash's
+# SECONDS clock from the digest child's start, including the preceding stages;
+# they are not per-child durations or a new timeout. An entry without an exit
+# localizes an unfinished boundary, not its cause. Markers contain no child
+# arguments, output, environment, or record/config values. Child stdout/stderr
+# remain captured and are replayed unchanged when the section returns.
+#
 # On a Pi primary, the supervision-block step also checks whether Pi's two
 # tracked primary extensions are loaded and prints a PI_WATCH_EXTENSION
 # reminder line when one is missing.
@@ -757,22 +768,34 @@ fi
 # re-block this digest and race the worker's sweeps against themselves.
 stage bootstrap
 subsection "BOOTSTRAP"
-if [ "$READ_ONLY" -eq 1 ]; then
-  BOOT_OUT=$(FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip \
-    FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
-    FM_TASKS_AXI_CHECK_REASON="$TASKS_AXI_CHECK_REASON" "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1)
-elif [ "$REEMIT" -eq 1 ]; then
-  BOOT_OUT=$(FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_LOCKED=1 FM_BOOTSTRAP_NETWORK=skip \
-    FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
-    FM_TASKS_AXI_CHECK_REASON="$TASKS_AXI_CHECK_REASON" "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1)
-else
+# FD 3 bypasses only this section's capture, then is restored by the group.
+# Close it in both child owners so their output cannot escape the capture.
+{
   BOOT_OUT=$(
-    "$SCRIPT_DIR/fm-herdr-session-cleanup.sh" 2>&1 || true
-    FM_BOOTSTRAP_NETWORK=skip FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
-      FM_TASKS_AXI_CHECK_REASON="$TASKS_AXI_CHECK_REASON" \
-      "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1
+    if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
+      printf 'SESSION_START_PHASE: projection-cleanup entry elapsed=%ss\n' "$SECONDS" >&3 || true
+      "$SCRIPT_DIR/fm-herdr-session-cleanup.sh" 3>&- 2>&1 || true
+      printf 'SESSION_START_PHASE: projection-cleanup exit elapsed=%ss\n' "$SECONDS" >&3 || true
+    fi
+    printf 'SESSION_START_PHASE: local-bootstrap entry elapsed=%ss\n' "$SECONDS" >&3 || true
+    if [ "$READ_ONLY" -eq 1 ]; then
+      FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip \
+        FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
+        FM_TASKS_AXI_CHECK_REASON="$TASKS_AXI_CHECK_REASON" "$SCRIPT_DIR/fm-bootstrap.sh" 3>&- 2>&1
+    elif [ "$REEMIT" -eq 1 ]; then
+      FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_LOCKED=1 FM_BOOTSTRAP_NETWORK=skip \
+        FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
+        FM_TASKS_AXI_CHECK_REASON="$TASKS_AXI_CHECK_REASON" "$SCRIPT_DIR/fm-bootstrap.sh" 3>&- 2>&1
+    else
+      FM_BOOTSTRAP_NETWORK=skip FM_TASKS_AXI_COMPATIBLE="$TASKS_AXI_COMPATIBLE" \
+        FM_TASKS_AXI_CHECK_REASON="$TASKS_AXI_CHECK_REASON" \
+        "$SCRIPT_DIR/fm-bootstrap.sh" 3>&- 2>&1
+    fi
+    BOOT_RC=$?
+    printf 'SESSION_START_PHASE: local-bootstrap exit elapsed=%ss\n' "$SECONDS" >&3 || true
+    exit "$BOOT_RC"
   )
-fi
+} 3>&1
 if [ -n "$BOOT_OUT" ]; then
   printf '%s\n' "$BOOT_OUT"
 else
