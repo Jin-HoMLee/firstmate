@@ -4,6 +4,10 @@
 #
 # A generated local record ends with this explicit structured suffix:
 #   (home: ...; scope: ...; projects: ...; added YYYY-MM-DD)
+# An explicit local shared-code binding uses:
+#   (root: ...; home: ...; scope: ...; projects: ...; added YYYY-MM-DD)
+# Its code root must resolve to the spawning primary's code root; home stays a
+# separate, already seeded operational home. Legacy local records are unchanged.
 # A remote record adds its host placement before the existing fields:
 #   (host: ...; root: ...; home: ...; scope: ...; projects: ...; added YYYY-MM-DD)
 # Summary text and scope text are natural language and may contain parentheses
@@ -34,6 +38,7 @@ secondmate_reply_lifecycle_lock_path() { printf '%s/.remote-reply-lifecycle-%s.l
 secondmate_registry_parse_line() {
   local line=$1
   local local_re='^- ([A-Za-z0-9._-]+) - (.+) \(home:[[:space:]]*([^;)]*);[[:space:]]*scope:[[:space:]]*(.*);[[:space:]]*projects:[[:space:]]*([^;)]*);[[:space:]]*added[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})\)[[:space:]]*$'
+  local shared_re='^- ([A-Za-z0-9._-]+) - (.+) \(root:[[:space:]]*([^;)]*);[[:space:]]*home:[[:space:]]*([^;)]*);[[:space:]]*scope:[[:space:]]*(.*);[[:space:]]*projects:[[:space:]]*([^;)]*);[[:space:]]*added[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})\)[[:space:]]*$'
   local remote_re='^- ([A-Za-z0-9._-]+) - (.+) \(host:[[:space:]]*([^;)]*);[[:space:]]*root:[[:space:]]*([^;)]*);[[:space:]]*home:[[:space:]]*([^;)]*);[[:space:]]*scope:[[:space:]]*(.*);[[:space:]]*projects:[[:space:]]*([^;)]*);[[:space:]]*added[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})\)[[:space:]]*$'
   SECONDMATE_REGISTRY_ID=
   SECONDMATE_REGISTRY_SUMMARY=
@@ -53,6 +58,15 @@ secondmate_registry_parse_line() {
     SECONDMATE_REGISTRY_SCOPE=${BASH_REMATCH[4]}
     SECONDMATE_REGISTRY_PROJECTS=${BASH_REMATCH[5]}
     SECONDMATE_REGISTRY_ADDED=${BASH_REMATCH[6]}
+  elif [[ "$line" =~ $shared_re ]]; then
+    SECONDMATE_REGISTRY_ID=${BASH_REMATCH[1]}
+    SECONDMATE_REGISTRY_SUMMARY=${BASH_REMATCH[2]}
+    SECONDMATE_REGISTRY_ROOT=${BASH_REMATCH[3]}
+    SECONDMATE_REGISTRY_HOME=${BASH_REMATCH[4]}
+    SECONDMATE_REGISTRY_SCOPE=${BASH_REMATCH[5]}
+    SECONDMATE_REGISTRY_PROJECTS=${BASH_REMATCH[6]}
+    SECONDMATE_REGISTRY_ADDED=${BASH_REMATCH[7]}
+    [ -n "$SECONDMATE_REGISTRY_ROOT" ] || return 1
   elif [[ "$line" =~ $remote_re ]]; then
     SECONDMATE_REGISTRY_ID=${BASH_REMATCH[1]}
     SECONDMATE_REGISTRY_SUMMARY=${BASH_REMATCH[2]}
@@ -117,7 +131,7 @@ secondmate_registry_path_key() {
 
 secondmate_registry_validate_bindings() {
   local reg=$1 resolver=$2 expected_id=${3:-} expected_home=${4:-}
-  local tmp snapshot bindings line id host root home home_key duplicate_homes duplicate_ids overlaps expected_home_key
+  local tmp snapshot bindings line id host root home home_key root_key duplicate_homes duplicate_ids overlaps expected_home_key
   SECONDMATE_REGISTRY_MATCH_HOST=
   SECONDMATE_REGISTRY_MATCH_ROOT=
   SECONDMATE_REGISTRY_MATCH_HOME=
@@ -224,6 +238,25 @@ secondmate_registry_validate_bindings() {
             SECONDMATE_REGISTRY_ERROR="unresolvable secondmate home for $id: $home"
             return 1
           fi
+          if [ -n "$root" ]; then
+            case "$root" in /*) ;; *)
+              rm -rf -- "$tmp"
+              SECONDMATE_REGISTRY_ERROR="unsafe non-absolute local code root for $id: $root"
+              return 1 ;;
+            esac
+            root_key=$("$resolver" "$root" 2>/dev/null || true)
+            if [ -z "$root_key" ] || [ "$root_key" = / ] || [ "$root_key" = "$home_key" ]; then
+              rm -rf -- "$tmp"
+              SECONDMATE_REGISTRY_ERROR="unresolvable or overlapping local code root for $id"
+              return 1
+            fi
+            case "$root_key/:$home_key/" in
+              "$home_key/"*|*":$root_key/"*)
+                rm -rf -- "$tmp"
+                SECONDMATE_REGISTRY_ERROR="overlapping local code root and home for $id"
+                return 1 ;;
+            esac
+          fi
           home_key="local:$home_key"
         fi
         printf '%s\t%s\n' "$home_key" "$id" >> "$bindings"
@@ -308,4 +341,126 @@ secondmate_registry_validate_bindings() {
     fi
   fi
   return 0
+}
+
+# Local shared-code binding mechanics. code_root= in parent task metadata is
+# the activated binding; a registry root: is the explicit requested binding.
+# Once activated, removing/changing the route refuses instead of reverting to
+# the home's retained old source. Missing registry recovery can use the record.
+# Neither helper writes metadata, adopts source, nor certifies installation or
+# native primary handoff. The home stays seeded and retained in place.
+secondmate_code_root_from_meta() {  # <meta>; empty for a legacy/absent record
+  local meta=$1
+  [ -e "$meta" ] || [ -L "$meta" ] || return 0
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  awk -F= '
+    $1 == "code_root" { n++; value=substr($0, index($0,"=")+1) }
+    END { if (n > 1 || (n == 1 && value == "")) exit 1; if (n == 1) print value }
+  ' "$meta"
+}
+
+secondmate_code_head_from_meta() {  # <meta>; empty for a legacy/absent record
+  local meta=$1
+  [ -e "$meta" ] || [ -L "$meta" ] || return 0
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  awk -F= '
+    $1 == "code_head" { n++; value=substr($0, index($0,"=")+1) }
+    END {
+      if (n > 1 || (n == 1 && (value ~ /[^0-9a-fA-F]/ || (length(value) != 40 && length(value) != 64)))) exit 1
+      if (n == 1) print value
+    }
+  ' "$meta"
+}
+
+SECONDMATE_LOCAL_CODE_ROOT=
+secondmate_local_code_binding() {  # <registry> <id> <home> <owner-root> <recorded-root>
+  local reg=$1 id=$2 home=$3 owner=$4 recorded=$5 declared='' count root top gd common recorded_real home_real
+  SECONDMATE_LOCAL_CODE_ROOT=
+  SECONDMATE_REGISTRY_ERROR=
+  if [ -e "$reg" ] || [ -L "$reg" ]; then
+    if [ ! -f "$reg" ] || [ -L "$reg" ]; then
+      SECONDMATE_REGISTRY_ERROR="secondmate registry is unavailable or unsafe: $reg"
+      return 1
+    fi
+    count=$(awk -v id="$id" '$1 == "-" && $2 == id { n++ } END { print n+0 }' "$reg") || return 1
+    if [ "$count" != 0 ]; then
+      secondmate_registry_validate_bindings "$reg" secondmate_registry_path_key "$id" "$home" || return 1
+      if [ "$SECONDMATE_REGISTRY_MATCH_REMOTE" = 1 ]; then
+        SECONDMATE_REGISTRY_ERROR="local shared-code binding cannot replace a remote route"
+        return 1
+      fi
+      declared=$SECONDMATE_REGISTRY_MATCH_ROOT
+    fi
+    if [ -n "$recorded" ] && [ -z "$declared" ]; then
+      SECONDMATE_REGISTRY_ERROR="activated shared-code binding for $id cannot be removed by a missing or legacy route"
+      return 1
+    fi
+  fi
+  [ -n "$declared$recorded" ] || return 0
+  root=${declared:-$recorded}
+  case "$root$recorded" in *$'\n'*|*$'\r'*|*$'\t'*)
+    SECONDMATE_REGISTRY_ERROR="unsafe local shared-code path for $id"; return 1 ;;
+  esac
+  case "$root" in /*) ;; *) SECONDMATE_REGISTRY_ERROR="local shared-code root must be absolute"; return 1 ;; esac
+  root=$(cd "$root" 2>/dev/null && pwd -P) || {
+    SECONDMATE_REGISTRY_ERROR="local shared-code root is unavailable"; return 1;
+  }
+  if [ "$root" = / ]; then
+    SECONDMATE_REGISTRY_ERROR="filesystem root cannot be a shared-code installation"
+    return 1
+  fi
+  owner=$(cd "$owner" 2>/dev/null && pwd -P) || return 1
+  home_real=$(cd "$home" 2>/dev/null && pwd -P) || return 1
+  if [ "$root" != "$owner" ]; then
+    SECONDMATE_REGISTRY_ERROR="local shared-code root for $id must match the owning primary code root"
+    return 1
+  fi
+  if [ -n "$recorded" ]; then
+    case "$recorded" in /*) ;; *) SECONDMATE_REGISTRY_ERROR="recorded shared-code root must be absolute"; return 1 ;; esac
+    recorded_real=$(cd "$recorded" 2>/dev/null && pwd -P) || return 1
+    if [ "$recorded_real" != "$root" ]; then
+      SECONDMATE_REGISTRY_ERROR="local shared-code root for $id differs from its activated binding"
+      return 1
+    fi
+  fi
+  if [ ! -f "$home_real/.fm-secondmate-home" ] || [ -L "$home_real/.fm-secondmate-home" ] \
+    || [ "$(cat "$home_real/.fm-secondmate-home" 2>/dev/null)" != "$id" ]; then
+    SECONDMATE_REGISTRY_ERROR="shared-code operational home is not safely marked for $id"
+    return 1
+  fi
+  case "$home_real/" in "$root/"*) SECONDMATE_REGISTRY_ERROR="shared code overlaps the operational home"; return 1 ;; esac
+  case "$root/" in "$home_real/"*) SECONDMATE_REGISTRY_ERROR="shared code overlaps the operational home"; return 1 ;; esac
+  top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top=$(cd "$top" && pwd -P) || return 1
+  gd=$(git -C "$root" rev-parse --git-dir 2>/dev/null) || return 1
+  common=$(git -C "$root" rev-parse --git-common-dir 2>/dev/null) || return 1
+  if [ "$top" != "$root" ] || [ "$gd" != "$common" ] \
+    || [ -e "$root/.fm-secondmate-home" ] || [ -L "$root/.fm-secondmate-home" ] \
+    || [ ! -f "$root/AGENTS.md" ] || [ ! -d "$root/bin" ]; then
+    SECONDMATE_REGISTRY_ERROR="shared code must be the primary code checkout, not a task or secondmate home"
+    return 1
+  fi
+  git -C "$root" rev-parse --verify HEAD >/dev/null 2>&1 || {
+    SECONDMATE_REGISTRY_ERROR="shared code has no readable committed HEAD"; return 1;
+  }
+  SECONDMATE_LOCAL_CODE_ROOT=$root
+}
+
+secondmate_shared_code_launch_supported() {  # <harness> <backend>
+  # Herdr relaunch requires the endpoint's existing Pi session identity (see
+  # fm-spawn.sh:relaunch_resume_args). A cross-root fresh-context handoff is
+  # not proved here; do not silently resume old context or freeze its status.
+  case "$1:$2" in pi:tmux|pi-signed:tmux) return 0 ;; esac
+  printf 'error: local shared-code launch supports Pi/pi-signed on tmux only; refusing %s/%s before replacement\n' "$1" "$2" >&2
+  return 1
+}
+
+secondmate_shared_code_native_files() {  # <code-root>
+  local root=$1 name
+  for name in fm-primary-pi-watch.ts fm-primary-turnend-guard.ts; do
+    [ -f "$root/.pi/extensions/$name" ] && [ -r "$root/.pi/extensions/$name" ] || {
+      printf 'error: shared-code primary extension is unavailable: %s\n' "$root/.pi/extensions/$name" >&2
+      return 1
+    }
+  done
 }

@@ -3,7 +3,7 @@
 #
 # Mechanical half of the /updatefirstmate skill. Fast-forwards the running
 # firstmate repo's default branch from origin, then fast-forwards every
-# registered secondmate home.
+# registered legacy secondmate home.
 #
 # Self-update source. The optional local, gitignored, not-inherited
 # $FM_HOME/config/self-update-source replaces origin as the source for this
@@ -12,7 +12,7 @@
 # branch carrying unmerged fixes on top of upstream). When it is present:
 #   - the primary fetches exactly that branch into refs/remotes/<remote>/<branch>
 #     and fast-forwards to it under the same guards as the origin path;
-#   - local secondmates advance to the primary's resulting default-branch commit
+#   - legacy local secondmates advance to the primary's resulting default-branch commit
 #     (the same commit the startup secondmate sync follows), importing it from
 #     the primary first when a standalone clone lacks it;
 #   - a remote secondmate is unchanged: its host runs its own copy of this
@@ -25,7 +25,12 @@
 # lint, and default-branch detection keep using origin. The fast-forward-only
 # guards still apply, so the named branch must only ever move forward.
 #
-# Local homes are treehouse worktrees or standalone clones; remote routes update
+# An activated local shared-code binding instead follows the already updated
+# primary code root. It never updates the retained old home source. Its recorded
+# launch code_head is NOT rewritten by this planning pass; the ordinary
+# correlated persistence/restart owner must refresh native context. Unsupported
+# bindings are skipped, never converted back to legacy home-source updates.
+# Local legacy homes are treehouse worktrees or standalone clones; remote routes update
 # their configured code root on that host and then fast-forward the persistent
 # home to that root. FAST-FORWARD ONLY, exactly like
 # fm-fleet-sync.sh: never force, never create a merge commit, never stash.
@@ -80,8 +85,10 @@
 # the trust binding of any locally armed fm-procevent-when watch whose action
 # executable lives in the updated repo; left alone, the watch's next fire
 # would be wrongly refused. After each home's own update (primary and every
-# local secondmate), this script best-effort runs that home's own
-# fm-procevent-when.sh rebind-all to republish those bindings against the new
+# local secondmate), this script best-effort runs fm-procevent-when.sh from
+# that binding's code root (the home for legacy routes, the shared root for an
+# activated local shared-code route), with FM_HOME still selecting that home.
+# It calls rebind-all to republish those bindings against the new
 # bytes; a failure there is swallowed rather than failing the update.
 #
 # Usage: fm-update.sh [--help]
@@ -245,11 +252,17 @@ fm_ff_after_secondmate_settled() {  # <id> <home> <window> <status> <instr>
   # Same bin/-changed-out-from-under-a-watch problem as the primary home
   # above, for a local secondmate's own worktree; "current" means bin/ did
   # not move there this pass, so there is nothing to rebind. Run the
-  # secondmate's OWN copy of the script, explicitly overriding FM_ROOT to its
-  # own worktree rather than letting an outer FM_ROOT_OVERRIDE (this process's
-  # own, if the caller set one) leak into the child and misscope it.
-  if [ "${4:-}" = "updated" ] && [ -x "$2/bin/fm-procevent-when.sh" ]; then
-    FM_HOME="$2" FM_ROOT_OVERRIDE="$2" "$2/bin/fm-procevent-when.sh" rebind-all || true
+  # binding's code copy of the script, with the target home explicit. Legacy
+  # routes use their own source; shared-code routes use the validated root,
+  # never a leaked outer override or the retained old source.
+  local rebind_root=${SECONDMATE_LOCAL_CODE_ROOT:-$2} rebind_needed=0 launch_head
+  [ "${4:-}" != updated ] || rebind_needed=1
+  if [ -n "${SECONDMATE_LOCAL_CODE_ROOT:-}" ]; then
+    launch_head=$(secondmate_code_head_from_meta "$STATE/$1.meta") || launch_head=
+    [ "$launch_head" = "$(git -C "$rebind_root" rev-parse HEAD)" ] || rebind_needed=1
+  fi
+  if [ "$rebind_needed" = 1 ] && [ -x "$rebind_root/bin/fm-procevent-when.sh" ]; then
+    FM_HOME="$2" FM_ROOT_OVERRIDE="$rebind_root" "$rebind_root/bin/fm-procevent-when.sh" rebind-all || true
   fi
   claim_settled_secondmate "$1"
 }
@@ -268,7 +281,7 @@ fi
 # Live direct reports first: state/<id>.meta with kind=secondmate carries the
 # authoritative home= path.
 if [ -n "$secondmate_base" ]; then
-  sweep_live_secondmate_metas "$STATE" "$secondmate_base" yes
+  sweep_live_secondmate_metas "$STATE" "$secondmate_base" yes "$SECONDMATES_MD"
 else
   echo "local secondmates: skipped: primary default-branch commit cannot be resolved"
 fi

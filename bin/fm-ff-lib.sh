@@ -524,7 +524,12 @@ FF_SEEN_HOMES=""
 # Validate and fast-forward one secondmate home, accumulating its stable
 # fm-<id> task selector into FF_NUDGE_WINDOWS when it should be live-converged.
 # Args:
-#   id home window base_mode nudge_requires_instr
+#   id home window base_mode nudge_requires_instr [registry] [metadata]
+# Activated local shared-code homes never receive a Git update. Their
+# code_root/code_head binding is checked against this primary and the selected
+# base. A changed shared code HEAD requires the existing settled/restart owner,
+# not a bootstrap AGENTS-only nudge or a claimed native reload. A declared but
+# not launched binding is skipped; retained legacy source is not an update fallback.
 # A home is nudged only when it ACTUALLY advanced (FF_STATUS=updated) and has a
 # live window. With nudge_requires_instr=yes the advance must also have changed
 # the instruction surface (FF_INSTR non-empty): an already-current home, or one
@@ -547,6 +552,8 @@ FF_SEEN_HOMES=""
 # An undefined hook is simply not called.
 process_secondmate() {
   local id=$1 home=$2 window=${3:-} base_mode=$4 nudge_requires_instr=${5:-no} home_real fm_root_real
+  local registry=${6:-${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md}
+  local meta=${7:-${FM_STATE_OVERRIDE:-$FM_HOME/state}/$1.meta} code_root code_head target_head base_ref branch
   [ -n "$id" ] || return 0
   [ -n "$home" ] || return 0
   fm_root_real=$(resolve_path "$FM_ROOT")
@@ -562,7 +569,56 @@ process_secondmate() {
   esac
   FF_SEEN_HOMES="$FF_SEEN_HOMES $home_real"
 
-  ff_target "$home_real" "secondmate $id" "$base_mode" yes yes "$id" "${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+  FF_STATUS=skipped
+  FF_INSTR=
+  code_root=$(secondmate_code_root_from_meta "$meta") || {
+    echo "secondmate $id: skipped: invalid code_root metadata"; return 0;
+  }
+  if ! secondmate_local_code_binding "$registry" "$id" "$home_real" "$FM_ROOT" "$code_root"; then
+    echo "secondmate $id: skipped: ${SECONDMATE_REGISTRY_ERROR:-invalid local code binding}"
+    return 0
+  fi
+  if [ -n "$SECONDMATE_LOCAL_CODE_ROOT" ]; then
+    FF_STATUS=skipped
+    FF_INSTR=
+    if [ -z "$code_root" ]; then
+      echo "secondmate $id: skipped: shared-code binding awaits an explicit launch; retained home untouched"
+      return 0
+    fi
+    code_root=$SECONDMATE_LOCAL_CODE_ROOT
+    if ! secondmate_shared_code_launch_supported \
+      "$(awk -F= '$1 == "harness" {print $2}' "$meta")" \
+      "$(awk -F= '$1 == "backend" {v=$2} END {print (v == "" ? "tmux" : v)}' "$meta")" \
+      || ! secondmate_shared_code_native_files "$code_root"; then
+      echo "secondmate $id: skipped: unsupported shared-code native refresh"
+      return 0
+    fi
+    code_head=$(secondmate_code_head_from_meta "$meta") || code_head=
+    if [ -z "$code_head" ] || ! git -C "$code_root" cat-file -e "$code_head^{commit}" 2>/dev/null; then
+      echo "secondmate $id: skipped: shared-code launch HEAD is unavailable"
+      return 0
+    fi
+    base_ref=$base_mode
+    if [ "$base_mode" = origin ]; then
+      branch=$(default_branch "$code_root") || return 0
+      base_ref="refs/remotes/origin/$branch"
+    fi
+    target_head=$(git -C "$code_root" rev-parse --verify "$base_ref^{commit}" 2>/dev/null) || return 0
+    if [ "$(git -C "$code_root" rev-parse HEAD)" != "$target_head" ]; then
+      echo "secondmate $id: skipped: shared code is not at the selected update target"
+      return 0
+    fi
+    FF_STATUS=current
+    if [ "$code_head" != "$target_head" ] \
+      && ! type fm_ff_after_secondmate_settled >/dev/null 2>&1; then
+      FF_STATUS=skipped
+      echo "secondmate $id: skipped: shared source changed since launch; use the existing update/restart owner, not an AGENTS-only nudge"
+      return 0
+    fi
+    echo "secondmate $id: shared code current; native refresh belongs to the restart owner; retained home untouched"
+  else
+    ff_target "$home_real" "secondmate $id" "$base_mode" yes yes "$id" "${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+  fi
   if [ -n "$window" ] && { [ "$FF_STATUS" = "updated" ] || [ "$FF_STATUS" = "current" ]; } \
     && type fm_ff_after_secondmate_settled >/dev/null 2>&1; then
     fm_ff_after_secondmate_settled "$id" "$home_real" "$window" "$FF_STATUS" "$FF_INSTR"
@@ -589,6 +645,6 @@ sweep_live_secondmate_metas() {
   [ -d "$state" ] || return 0
   while IFS='|' read -r id home window meta; do
     if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
-    process_secondmate "$id" "$home" "$window" "$base_mode" "$nudge_requires_instr"
+    process_secondmate "$id" "$home" "$window" "$base_mode" "$nudge_requires_instr" "$registry" "$meta"
   done < <(live_secondmate_meta_records "$state" "$registry")
 }

@@ -18,6 +18,8 @@
 #       is copied to data/charter.md, newly cloned no-mistakes projects are
 #       initialized, an ignored .fm-secondmate-parent binding is published before
 #       the .fm-secondmate-home identity marker, and data/secondmates.md is updated.
+#       New local routes use legacy home-source placement. Re-seeding preserves
+#       an explicit local root: binding but never activates or migrates it.
 #       Seeding is transactional: on validation, clone, init, or registry failure,
 #       generated briefs, new homes, new project clones, and registry edits are
 #       rolled back. Treehouse-acquired homes are returned only when the rollback
@@ -759,18 +761,22 @@ initialize_no_mistakes_project() {
 }
 
 write_registry() {
-  local id=$1 home=$2 projects_csv=$3 brief=$4 scope summary tmp today
+  local id=$1 home=$2 projects_csv=$3 brief=$4 scope summary tmp today code_prefix='' code_root
   mkdir -p "$DATA"
   scope=$(registry_scope_for_brief "$brief")
   summary=$(registry_summary_for_brief "$brief")
   today=$(date +%F)
   tmp="$REG.tmp.$$"
   if [ -f "$REG" ]; then
+    if [ "$(secondmate_registry_field "$REG" "$id" remote || true)" = 0 ]; then
+      code_root=$(secondmate_registry_field "$REG" "$id" root || true)
+      [ -z "$code_root" ] || code_prefix="root: $code_root; "
+    fi
     grep -vE "^- $id( |$)" "$REG" > "$tmp" || true
   else
     : > "$tmp"
   fi
-  printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' "$id" "$summary" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
+  printf -- '- %s - %s (%shome: %s; scope: %s; projects: %s; added %s)\n' "$id" "$summary" "$code_prefix" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
   mv "$tmp" "$REG"
 }
 

@@ -22,6 +22,15 @@ A local route uses:
 - <id> - <one-sentence charter summary> (home: <absolute-home-path>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
+An explicitly bound local shared-code route uses:
+
+```markdown
+- <id> - <one-sentence charter summary> (root: <absolute-primary-code-root>; home: <absolute-existing-home>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
+```
+
+[`Local shared-code binding`](../../../docs/configuration.md#local-shared-code-binding) owns its limited runtime support, activation/recovery boundary, preservation requirements, and unsupported primary/Herdr handoffs.
+It is opt-in, never inferred from `FM_HOME`, and does not merge or replace private homes.
+
 A whole-home remote route uses:
 
 ```markdown
@@ -87,7 +96,9 @@ It also writes the gitignored `.fm-secondmate-parent` durable binding before the
 Select the registered mate's id when resolving its pin; [`bin/fm-harness.sh`](../../../bin/fm-harness.sh)'s header owns the resolver commands.
 
 This section is the single owner of the secondmate sync and inherited-local-material propagation contract; `AGENTS.md` sections 3 and 4 point here.
-Before a local launch, `fm-spawn.sh --secondmate` locally fast-forwards the home to the primary firstmate checkout's current default-branch commit when it is safe, or reconciles a clean divergence whose complete local result is already present there (e.g. after a squash merge) with `reset --keep`; dirty, uniquely diverged, or in-flight homes launch unchanged with a warning, and a genuine divergence gets the same durable reconciliation record `bin/fm-ff-lib.sh` writes for `/updatefirstmate`.
+An explicit local shared-code route keeps its old tracked home source untouched through launch, recovery and update; it uses the validated primary code root for the native command and code tools, with the existing home for private state.
+Do not use that mode as proof of adoption, native handoff or retained-safeguard equivalence; follow its [configuration limits](../../../docs/configuration.md#local-shared-code-binding), and refuse unsupported axes without changing pins or backends.
+Before a legacy local launch, `fm-spawn.sh --secondmate` locally fast-forwards the home to the primary firstmate checkout's current default-branch commit when it is safe, or reconciles a clean divergence whose complete local result is already present there (e.g. after a squash merge) with `reset --keep`; dirty, uniquely diverged, or in-flight homes launch unchanged with a warning, and a genuine divergence gets the same durable reconciliation record `bin/fm-ff-lib.sh` writes for `/updatefirstmate`.
 The locked session-start deferred network stage runs the same bootstrap sweep for every live local secondmate home, discovered from `state/<id>.meta` records with `kind=secondmate` (`data/secondmates.md` only backfills `home=` for older records).
 That no-fetch path is a purely local fast-forward or redundant-divergence reconcile of tracked files, never an origin fetch, and it never touches the gitignored operational dirs, so a secondmate's backlog, projects, and in-flight work are never disturbed; a linked worktree advances immediately, while a standalone clone that lacks the target receives firstmate updates through `/updatefirstmate`.
 A remote launch and the deferred bootstrap sweep hand the configured host the primary's own default-branch commit and ask it to fast-forward, or reconcile a redundant divergence, the persistent home to exactly that commit, under the same clean, ancestry, and branch guards a local home gets.
@@ -122,7 +133,8 @@ Never copy any secondmate `data/captain-shared.md` back into the primary.
 Keep each home's `data/captain.md` domain-local.
 After first propagation to an existing home, trim that home's local `data/captain.md` by hand to domain-specific content plus pointers to `data/captain-shared.md`; do not automate or silently delete private content.
 Keep every `data/learnings.md` fully local by captain decision; route fleet-general machinery facts into tracked documentation through the normal firstmate repo path rather than inventing shared learnings propagation.
-No AGENTS.md reread nudge is needed at spawn or respawn because the agent reads instructions fresh on launch; only the bootstrap sweep's running-home instruction-surface advance needs that AGENTS.md re-read.
+No AGENTS.md reread nudge is needed at spawn or respawn because the agent reads instructions fresh on launch; the bootstrap sweep's legacy-local or remote running-home instruction-surface advance needs that AGENTS.md re-read.
+A shared-code source change instead requires the existing update/restart owner; an AGENTS-only nudge does not establish fresh native wiring.
 Bootstrap reports successful AGENTS.md re-read sends as `BOOTSTRAP_INFO:` and only emits `NUDGE_SECONDMATES:` when that send fails and needs retry.
 A separate, literal-content config reread is required whenever inherited `config/*` material changes under an already-running secondmate.
 For a local home, after each successful allowlisted config write, both the locked bootstrap convergence path and mid-session `bin/fm-config-push.sh` use the shared propagation report to build one per-home generation-specific private instruction file from the validated destination post-write bytes for only the declared config items that actually changed for that home, in declaration order.
@@ -241,6 +253,7 @@ It never initiates a survey or audit during recovery.
 A secondmate is persistent by default.
 An empty queue is healthy and does not trigger teardown.
 Run `bin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or main firstmate explicitly decides to retire that persistent second mate.
+Local shared-code homes currently have no supported retirement path: teardown refuses their direct or forced-descendant removal, and their operational directories and retained history stay in place.
 
 The safety check is the secondmate's own home.
 Teardown refuses while its `state/*.meta` contains in-flight work.

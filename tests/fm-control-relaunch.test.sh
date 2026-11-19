@@ -370,6 +370,7 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   local dir out rc gen_before gen_after
   dir=$(new_case same rl1)
   add_ship_task "$dir" rl1 claude
+  printf 'code_root=unrelated-ship-metadata\ncode_head=opaque-ship-note\n' >> "$dir/home/state/rl1.meta"
   gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
   printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
   out=$(run_control "$dir" rl1 relaunch --note "stopped mid-refactor"); rc=$?
@@ -380,6 +381,8 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   [ "$(meta_field "$dir" rl1 worktree)" = "$dir/wt" ] \
     || fail "the worktree must be reused, not reallocated"
   [ "$(meta_field "$dir" rl1 kind)" = ship ] || fail "kind must survive the relaunch"
+  assert_equals unrelated-ship-metadata "$(meta_field "$dir" rl1 code_root)" 'new secondmate fields do not consume unrelated ship metadata'
+  assert_equals opaque-ship-note "$(meta_field "$dir" rl1 code_head)" 'unrelated ship note remains byte-preserved'
   [ "$(meta_field "$dir" rl1 project)" = "$dir/proj" ] || fail "project must survive the relaunch"
   gen_after=$(meta_field "$dir" rl1 busy_gen)
   [ -n "$gen_after" ] && [ "$gen_after" != "$gen_before" ] \
@@ -2220,6 +2223,100 @@ test_journal_records_the_checkpoint_it_proved() {
   pass "fm-control relaunch: the checkpoint records the exact unlanded work it preserved"
 }
 
+# --- explicit local shared-code replacement --------------------------------
+
+add_shared_code_secondmate() {  # <case-dir> <id>
+  local dir=$1 id=$2
+  fm_git_init_commit "$dir/code"
+  mkdir -p "$dir/code/.pi/extensions" "$dir/home/config" "$dir/home/data/$id"
+  printf 'shared code instructions\n' > "$dir/code/AGENTS.md"
+  ln -s "$ROOT/bin" "$dir/code/bin"
+  : > "$dir/code/.pi/extensions/fm-primary-pi-watch.ts"
+  : > "$dir/code/.pi/extensions/fm-primary-turnend-guard.ts"
+  git -C "$dir/code" add -A
+  git -C "$dir/code" commit -qm 'synthetic native binding'
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/"{state,data,config,projects,bin}
+  printf '%s\n' "$id" > "$dir/smhome/.fm-secondmate-home"
+  printf 'retained instructions\n' > "$dir/smhome/AGENTS.md"
+  printf 'standing charter\n' > "$dir/smhome/data/charter.md"
+  printf 'charter pointer\n' > "$dir/home/data/$id/brief.md"
+  printf 'pi\n' > "$dir/home/config/secondmate-harness"
+  printf -- '- %s - synthetic (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$id" "$dir/code" "$dir/smhome" > "$dir/home/data/secondmates.md"
+  {
+    printf 'window=fmses:fm-%s\nendpoint_task_id=%s\n' "$id" "$id"
+    printf 'worktree=%s\nproject=%s\nhome=%s\n' "$dir/smhome" "$dir/smhome" "$dir/smhome"
+    printf 'harness=pi\nkind=secondmate\nmode=secondmate\nyolo=off\nmodel=default\neffort=default\n'
+    printf 'code_root=%s\ncode_head=%s\n' "$dir/code" "$(git -C "$dir/code" rev-parse HEAD)"
+  } > "$dir/home/state/$id.meta"
+  printf 'pi' > "$dir/fake/command"
+  printf 'pi' > "$dir/fake/becomes"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  fm_fake_exit0 "$dir/fakebin" pi
+}
+
+test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding() {
+  local dir out rc head
+  dir=$(new_case shared-code rlshared)
+  add_shared_code_secondmate "$dir" rlshared
+  head=$(git -C "$dir/smhome" rev-parse HEAD)
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlshared relaunch); rc=$?
+  expect_code 0 "$rc" "shared-code replacement should use the existing transaction"$'\n'"$out"
+  assert_equals "$dir/code" "$(meta_field "$dir" rlshared code_root)" 'source binding survives replacement'
+  assert_equals "$dir/smhome" "$(meta_field "$dir" rlshared worktree)" 'old source/home custody stays in place'
+  assert_equals "$head" "$(git -C "$dir/smhome" rev-parse HEAD)" 'replacement does not move retained home history'
+  assert_equals "$dir/code" "$(journal_field "$dir" rlshared code_root)" 'checkpoint includes shared code separately'
+  assert_grep "cd -- '$dir/code' && FM_ROOT_OVERRIDE='$dir/code'" "$dir/fake/literal" 'replacement binds cwd and root together'
+  assert_grep "$dir/code/.pi/extensions/fm-primary-pi-watch.ts" "$dir/fake/literal" 'replacement native wiring comes from shared source'
+  assert_equals 'standing charter' "$(cat "$dir/smhome/data/charter.md")" 'standing charter stays unchanged'
+  pass 'fm-control shared-code replacement preserves the same home/endpoint and rebuilds its native source binding'
+}
+
+test_shared_code_relaunch_refuses_unsupported_profile_before_stop() {
+  local dir out rc before
+  dir=$(new_case shared-code-unsupported rlsharedbad)
+  add_shared_code_secondmate "$dir" rlsharedbad
+  printf 'codex\n' > "$dir/home/config/secondmate-harness"
+  before=$(cat "$dir/home/state/rlsharedbad.meta")
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsharedbad relaunch); rc=$?
+  expect_code 1 "$rc" 'unsupported shared-code replacement must refuse'
+  assert_contains "$out" 'local shared-code launch supports Pi/pi-signed' 'unsupported native axis is explicit'
+  assert_equals pi "$(cat "$dir/fake/command")" 'unsupported replacement does not stop the old agent'
+  assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+  assert_equals "$before" "$(cat "$dir/home/state/rlsharedbad.meta")" 'prior metadata preserved'
+  pass 'fm-control refuses an unsupported shared-code profile before stopping the existing agent'
+}
+
+test_shared_code_relaunch_refuses_binding_removal_before_stop() {
+  local dir out rc before
+  dir=$(new_case shared-code-removed rlsharedremoved)
+  add_shared_code_secondmate "$dir" rlsharedremoved
+  printf -- '- rlsharedremoved - legacy (home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$dir/smhome" > "$dir/home/data/secondmates.md"
+  before=$(cat "$dir/home/state/rlsharedremoved.meta")
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsharedremoved relaunch); rc=$?
+  expect_code 1 "$rc" 'removing an activated source binding must refuse'
+  assert_contains "$out" 'cannot be removed' 'no implicit downgrade to retained source'
+  assert_equals pi "$(cat "$dir/fake/command")" 'binding mismatch does not stop the old agent'
+  assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+  assert_equals "$before" "$(cat "$dir/home/state/rlsharedremoved.meta")" 'prior metadata preserved'
+  pass 'fm-control refuses a silent shared-code downgrade before stopping the existing agent'
+}
+
+test_shared_code_relaunch_refuses_missing_native_wiring_before_stop() {
+  local dir out rc
+  dir=$(new_case shared-code-missing rlsharedmissing)
+  add_shared_code_secondmate "$dir" rlsharedmissing
+  rm "$dir/code/.pi/extensions/fm-primary-pi-watch.ts"
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsharedmissing relaunch); rc=$?
+  expect_code 1 "$rc" 'missing native wiring must refuse before replacement'
+  assert_contains "$out" 'shared-code primary extension is unavailable' 'missing source binding is explicit'
+  assert_equals pi "$(cat "$dir/fake/command")" 'missing source does not stop the old agent'
+  assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+  pass 'fm-control refuses missing shared native wiring before stopping the existing agent'
+}
+
 # --- secondmate child-work safety -------------------------------------------
 
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter() {
@@ -3320,6 +3417,10 @@ test_stop_transport_failure_reconciles_a_dead_agent
 test_complete_journal_failure_rolls_back_from_durable_phase
 test_prepublication_abort_retires_replacement_wiring_and_busy_state
 test_journal_records_the_checkpoint_it_proved
+test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding
+test_shared_code_relaunch_refuses_unsupported_profile_before_stop
+test_shared_code_relaunch_refuses_binding_removal_before_stop
+test_shared_code_relaunch_refuses_missing_native_wiring_before_stop
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter
 test_secondmate_relaunch_refuses_an_unmarked_home
 test_secondmate_checkpoint_refuses_unreadable_child_state

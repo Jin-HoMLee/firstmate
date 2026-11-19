@@ -206,6 +206,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-omp-profile-lib.sh"
 # shellcheck source=bin/fm-exclude-tools-lib.sh
 . "$SCRIPT_DIR/fm-exclude-tools-lib.sh"
+# shellcheck source=bin/fm-secondmate-registry-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -1037,6 +1039,16 @@ resolve_relaunch_profile() {
   # transaction, where nothing has changed yet.
   fm_control_harness_supports_kind "$TARGET_HARNESS" "$KIND" \
     || die "'$TARGET_HARNESS' is not verified to run a $KIND task, so relaunching $ID onto it would stop the running agent for a launch that must be refused; choose an adapter verified for this kind"
+  if [ "$KIND" = secondmate ]; then
+    local recorded_code_root
+    recorded_code_root=$(secondmate_code_root_from_meta "$META") || die "invalid code_root metadata for $ID"
+    secondmate_local_code_binding "$DATA/secondmates.md" "$ID" "$WT" "$FM_ROOT" "$recorded_code_root" \
+      || die "${SECONDMATE_REGISTRY_ERROR:-cannot resolve the local shared-code binding for $ID}"
+    if [ -n "$SECONDMATE_LOCAL_CODE_ROOT" ]; then
+      secondmate_shared_code_launch_supported "$TARGET_HARNESS" "$BACKEND" || return 1
+      secondmate_shared_code_native_files "$SECONDMATE_LOCAL_CODE_ROOT" || return 1
+    fi
+  fi
   # A model or effort chosen for the previous harness does not transfer to a
   # different one, so an explicit harness change resets both axes unless the
   # caller names them too.
@@ -1178,6 +1190,11 @@ safe_checkpoint() {
       children=$((children + 1))
     done
     CHECKPOINT_LINES+=("children=$children")
+    if [ -n "${SECONDMATE_LOCAL_CODE_ROOT:-}" ]; then
+      head=$(git -C "$SECONDMATE_LOCAL_CODE_ROOT" rev-parse --verify HEAD) \
+        || die "shared code HEAD cannot be inspected before replacement"
+      CHECKPOINT_LINES+=("code_root=$SECONDMATE_LOCAL_CODE_ROOT" "code_head=$head")
+    fi
   fi
 }
 

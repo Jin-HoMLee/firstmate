@@ -34,7 +34,8 @@ Select the intended `FM_HOME` on every invocation, including when different home
 The four-home behavior cases in [`tests/fm-tasks-axi.test.sh`](../tests/fm-tasks-axi.test.sh) and [`tests/fm-harness-precedence.test.sh`](../tests/fm-harness-precedence.test.sh) cover backlog and configuration isolation, not native agent launches.
 
 This command-addressing separation is not an installation-migration command.
-Persistent secondmate launch still uses its seeded home's working directory and tracked native integration files under the [secondmate provisioning contract](../.agents/skills/secondmate-provisioning/SKILL.md#charter-and-seed); setting `FM_HOME` alone does not switch that launch to another code root.
+Legacy persistent secondmate launch uses its seeded home's working directory and tracked native integration files under the [secondmate provisioning contract](../.agents/skills/secondmate-provisioning/SKILL.md#charter-and-seed); setting `FM_HOME` alone does not switch that launch to another code root.
+An [explicit local shared-code binding](#local-shared-code-binding) can select a separate code root on the limited axes described below; it is not an automatic migration or a verified native handoff.
 Do not replace homes with links to one shared private directory, remove an old installation, or treat command-addressing tests as proof of a supported source or runtime handoff.
 
 ### Root and directory overrides
@@ -1358,6 +1359,34 @@ The script's header owns the exact parsing and the per-home outcome lines.
 
 Persistent secondmate routes live locally in `data/secondmates.md`.
 The concise single-line route contract is owned by the [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md#routing-table), including the parser-compatible fields, one-sentence summary requirement, `home:` pointer to the seeded charter, and limit on extra registry prose.
+
+### Local shared-code binding
+
+A local route may explicitly name the owning primary's code checkout as `root:` while retaining its existing seeded operational `home:`; the [routing contract](../.agents/skills/secondmate-provisioning/SKILL.md#routing-table) owns the single-line form.
+There is no automatic conversion, source adoption, home replacement, new launcher, or change to ship/scout placement.
+The root must resolve to the invoking primary's code root, not a task copy or secondmate home, and must be separate from the operational home.
+Ordinary local routes without `root:` retain their existing behavior; remote `host:` routes are unchanged.
+
+The bounded implementation accepts **Pi and pi-signed on tmux only** and refuses other combinations before replacing an existing agent.
+Herdr is deliberately unsupported for this binding: its [agent session identity requirement](herdr-backend.md#agent-status-authority-and-relaunch) needs a verified cross-root context handoff, not an assumed fresh session or silent reuse of old instructions.
+It never changes a configured runtime to get around that refusal.
+Primary-session handoff and replacement of retained safeguards are not supplied by this setting.
+Source adoption still requires those independent preconditions, owner-scoped preservation, and the selected full validation; a configured path or a custody receipt alone proves none of them.
+
+For the accepted command shape, launch/relaunch keeps `FM_HOME` at the retained home and binds **cwd, native primary extension paths, and `FM_ROOT_OVERRIDE` together** to the explicit code root.
+The parent records `code_root` and the committed source `code_head` at launch; these identify the intended binding, not proof that native supervision ran successfully.
+Recovery preserves that binding, refuses a contradictory or silently removed route, and may recover it from the recorded binding when the registry itself is absent.
+`fm-home-seed.sh` creates legacy routes and preserves an existing explicit local root when re-seeding; it does not activate or migrate a shared-code installation.
+
+Startup/update never fast-forwards, resets, fetches into, or runs maintenance hooks from the retained old home source in this mode.
+A declared but unlaunched binding is skipped, not activated by a sweep.
+After a shared source change, startup reports the need for the existing update/restart owner instead of pretending that an AGENTS-only reread refreshed native wiring.
+The update owner refreshes action bindings from the shared code with each target's own `FM_HOME`, and the normal correlated persistence/restart contract remains required before replacement.
+Shared-code home retirement is unsupported and refused, including forced descendant cleanup; retain the homes and their old histories in place.
+
+[`tests/fm-shared-code.test.sh`](../tests/fm-shared-code.test.sh) executes rendered command suffixes with shell-only fake Pi executables for four separate homes.
+The existing [replacement](../tests/fm-control-relaunch.test.sh), [sync](../tests/fm-secondmate-sync.test.sh), [update](../tests/fm-update.test.sh), and [preservation](../tests/fm-secondmate-safety.test.sh) suites exercise their corresponding owners.
+These are synthetic support tests, **not live native-runtime, backend, safeguard-equivalence, backup-completeness, or primary-handoff acceptance evidence**.
 
 ### Remote routes and validation
 

@@ -461,7 +461,7 @@ secondmate_sync() {
   }
 
   secondmate_retry_pending_nudges() {
-    local marker id selector home commit message remote expected_marker meta meta_home home_real head out
+    local marker id selector home commit message remote expected_marker meta meta_home home_real head out code_root retry_root launch_head
     [ -d "$SECOND_MATE_NUDGE_PENDING_DIR" ] || return 0
     for marker in "$SECOND_MATE_NUDGE_PENDING_DIR"/*.pending; do
       [ -f "$marker" ] || continue
@@ -515,7 +515,24 @@ secondmate_sync() {
         echo "NUDGE_SECONDMATES: secondmate $id: send failed: retry target home changed"
         continue
       }
-      head=$(git -C "$home_real" rev-parse HEAD 2>/dev/null || true)
+      code_root=$(secondmate_code_root_from_meta "$meta") || {
+        echo "NUDGE_SECONDMATES: secondmate $id: send failed: invalid shared-code metadata"
+        continue
+      }
+      retry_root=$home_real
+      if [ -n "$code_root" ]; then
+        if ! secondmate_local_code_binding "$DATA/secondmates.md" "$id" "$home_real" "$FM_ROOT" "$code_root"; then
+          echo "NUDGE_SECONDMATES: secondmate $id: send failed: shared-code binding changed"
+          continue
+        fi
+        retry_root=$SECONDMATE_LOCAL_CODE_ROOT
+        launch_head=$(secondmate_code_head_from_meta "$meta") || launch_head=
+        if [ "$launch_head" != "$commit" ]; then
+          echo "NUDGE_SECONDMATES: secondmate $id: send failed: shared source needs native refresh through the update/restart owner"
+          continue
+        fi
+      fi
+      head=$(git -C "$retry_root" rev-parse HEAD 2>/dev/null || true)
       [ -n "$head" ] && [ "$head" = "$commit" ] || {
         echo "NUDGE_SECONDMATES: secondmate $id: send failed: retry target is not at recorded instruction commit"
         continue

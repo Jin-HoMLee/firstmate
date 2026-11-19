@@ -691,6 +691,56 @@ test_self_update_source_rewrite_is_skipped() {
   pass "T15 a non-fast-forward self-update source is skipped, never forced"
 }
 
+test_shared_code_update_rebinds_from_code_not_retained_home() {
+  local w old before out
+  w=$(new_world shared-code-update)
+  mkdir -p "$w/seed/.pi/extensions"
+  : > "$w/seed/.pi/extensions/fm-primary-pi-watch.ts"
+  : > "$w/seed/.pi/extensions/fm-primary-turnend-guard.ts"
+  cat > "$w/seed/bin/fm-procevent-when.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s|%s|%s\n' "$FM_HOME" "$FM_ROOT_OVERRIDE" "$*" >> "$FM_TEST_REBIND_LOG"
+SH
+  chmod +x "$w/seed/bin/fm-procevent-when.sh"
+  git -C "$w/seed" add -A
+  git -C "$w/seed" commit -qm 'synthetic shared native source'
+  git -C "$w/seed" push -q origin main
+  git -C "$w/main" pull -q --ff-only
+  add_sm "$w" shared pi
+  old=$(git -C "$w/shared" rev-parse HEAD)
+  mkdir -p "$w/shared/"{state,data,config,projects}
+  printf 'code_root=%s\ncode_head=%s\n' "$w/main" "$old" >> "$w/home/state/shared.meta"
+  printf -- '- shared - synthetic (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$w/main" "$w/shared" > "$w/home/data/secondmates.md"
+  cat > "$w/shared/bin/fm-procevent-when.sh" <<'SH'
+#!/usr/bin/env bash
+printf old-source-invoked >> "$FM_TEST_REBIND_LOG"
+exit 88
+SH
+  printf 'unfinished old instructions\n' >> "$w/shared/AGENTS.md"
+  before=$(git -C "$w/shared" diff HEAD)
+  # Runtime evidence is simulated, never a real endpoint.
+  cat > "$w/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  list-windows) cat "$FM_FAKE_DIR/windows" ;;
+  display-message) case "$*" in *pane_current_command*) printf 'pi\n' ;; esac ;;
+esac
+SH
+  chmod +x "$w/fakebin/tmux"
+  bump_origin "$w" bin
+  out=$(FM_TEST_REBIND_LOG="$w/rebind.log" run_update "$w")
+  assert_contains "$out" 'shared code current; native refresh belongs to the restart owner' 'source settlement is not a native reload claim'
+  assert_contains "$out" 'restart-secondmates: fm-shared' 'existing owner receives shared-code restart eligibility'
+  assert_grep "$w/shared|$w/main|rebind-all" "$w/rebind.log" 'child binding refresh executes shared source with the child home'
+  assert_no_grep old-source-invoked "$w/rebind.log" 'retained old hook is never executed'
+  assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" 'update leaves retained history in place'
+  assert_equals "$before" "$(git -C "$w/shared" diff HEAD)" 'update preserves unfinished old work'
+  assert_grep "code_head=$old" "$w/home/state/shared.meta" 'planning restart does not fabricate a new native launch'
+  pass 'shared-code update uses existing rebind/restart owners without updating or executing retained old home source'
+}
+
+test_shared_code_update_rebinds_from_code_not_retained_home
 test_updates_main_and_secondmate
 test_reread_gate_is_instruction_only
 test_bin_only_advance_restarts

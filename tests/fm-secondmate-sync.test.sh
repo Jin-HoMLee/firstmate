@@ -576,6 +576,50 @@ test_bootstrap_nudge_retry_is_idempotent() {
   pass "T8d bootstrap nudge retry is idempotent after success"
 }
 
+test_shared_code_pending_nudge_does_not_substitute_for_native_refresh() {
+  local w old current fakebin marker out
+  w=$(new_world shared-code-nudge)
+  mkdir -p "$w/main/.pi/extensions"
+  : > "$w/main/.pi/extensions/fm-primary-pi-watch.ts"
+  : > "$w/main/.pi/extensions/fm-primary-turnend-guard.ts"
+  git -C "$w/main" add -A
+  git -C "$w/main" commit -qm 'synthetic primary integration'
+  old=$(head_of "$w/main")
+  add_sm_worktree "$w" sm-instr "$old"
+  bump_primary "$w" instr
+  current=$(head_of "$w/main")
+  fakebin=$(make_fake_toolchain "$w")
+  : > "$w/home/state/sm-instr.inbox"
+  PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
+    FM_SEND_SETTLE=0 "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1
+  marker="$w/home/state/.secondmate-nudge-pending/sm-instr.pending"
+  assert_present "$marker" 'precondition: legacy failed nudge remains recorded'
+  rm "$w/home/state/sm-instr.inbox"
+  # Simulate a recorded shared binding whose native launch predates the source
+  # change. Retain the old home source rather than fast-forwarding it again.
+  git -C "$w/sm-instr" checkout -q --detach "$old"
+  sed 's/^harness=codex$/harness=pi/' "$w/home/state/sm-instr.meta" > "$w/meta.tmp"
+  mv "$w/meta.tmp" "$w/home/state/sm-instr.meta"
+  printf 'code_root=%s\ncode_head=%s\n' "$w/main" "$old" >> "$w/home/state/sm-instr.meta"
+  printf -- '- sm-instr - synthetic (root: %s; home: %s; scope: test; projects: ; added 2026-01-01)\n' \
+    "$w/main" "$w/sm-instr" > "$w/home/data/secondmates.md"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
+    FM_SEND_SETTLE=0 "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
+  assert_contains "$out" 'shared source needs native refresh through the update/restart owner' 'stale retry cannot certify native refresh'
+  assert_present "$marker" 'refused retry retains its original durable marker'
+  assert_not_contains "$out" 'BOOTSTRAP_INFO: nudged fm-sm-instr' 'stale native epoch receives no reread substitute'
+  # A separately recorded fresh launch permits the old pending message to
+  # converge against shared source, never against the retained home HEAD.
+  sed "s/^code_head=.*/code_head=$current/" "$w/home/state/sm-instr.meta" > "$w/meta.tmp"
+  mv "$w/meta.tmp" "$w/home/state/sm-instr.meta"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/main" \
+    FM_SEND_SETTLE=0 "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
+  assert_contains "$out" 'BOOTSTRAP_INFO: nudged fm-sm-instr' 'current recorded binding can clear its pending message'
+  assert_absent "$marker" 'successful retry clears marker'
+  assert_equals "$old" "$(head_of "$w/sm-instr")" 'retry never updates retained source'
+  pass 'shared-code pending reread refuses stale native context and validates the shared rather than retained source'
+}
+
 test_bootstrap_nudge_retry_refuses_changed_home() {
   local w c1 fakebin marker out other
   w=$(new_world nudge-retry-home-change)
@@ -1425,6 +1469,61 @@ test_remote_launch_does_not_retarget_host_copy() {
   pass "R9 a remote launch leaves the home on the parent's commit while an ordinary spawn follows its own checkout"
 }
 
+test_shared_code_sweep_keeps_old_source_and_requires_native_refresh() {
+  local w old new before out
+  w=$(new_world shared-code-sweep)
+  ignore_marker_commit "$w"
+  mkdir -p "$w/main/.pi/extensions"
+  : > "$w/main/.pi/extensions/fm-primary-pi-watch.ts"
+  : > "$w/main/.pi/extensions/fm-primary-turnend-guard.ts"
+  git -C "$w/main" add -A
+  git -C "$w/main" commit -qm 'synthetic native source'
+  old=$(head_of "$w/main")
+  seed_marked_home "$w" shared "$old"
+  seed_marked_home "$w" legacy "$old"
+  seed_marked_home "$w" idle "$old"
+  rm "$w/home/state/idle.meta"
+  sed 's/^harness=codex$/harness=pi/' "$w/home/state/shared.meta" > "$w/meta.tmp"
+  mv "$w/meta.tmp" "$w/home/state/shared.meta"
+  printf 'code_root=%s\ncode_head=%s\n' "$w/main" "$old" >> "$w/home/state/shared.meta"
+  {
+    printf -- '- shared - synthetic (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' "$w/main" "$w/shared"
+    printf -- '- legacy - synthetic (home: %s; scope: test; projects: none; added 2026-01-01)\n' "$w/legacy"
+    printf -- '- idle - synthetic (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' "$w/main" "$w/idle"
+  } > "$w/home/data/secondmates.md"
+  printf 'unfinished retained work\n' >> "$w/shared/AGENTS.md"
+  before=$(git -C "$w/shared" diff HEAD -- AGENTS.md)
+  bump_primary "$w" instr
+  new=$(head_of "$w/main")
+  FF_SEEN_HOMES='' FF_NUDGE_WINDOWS=''
+  FM_HOME="$w/home" FM_ROOT="$w/main" \
+    sweep_live_secondmate_metas "$w/home/state" "$new" yes "$w/home/data/secondmates.md" > "$w/sweep.out"
+  out=$(cat "$w/sweep.out")
+  assert_contains "$out" 'shared source changed since launch' 'bootstrap cannot substitute an AGENTS-only nudge for native refresh'
+  assert_equals "$old" "$(head_of "$w/shared")" 'shared home retained old HEAD'
+  assert_equals "$before" "$(git -C "$w/shared" diff HEAD -- AGENTS.md)" 'shared unfinished work unchanged'
+  assert_equals "$new" "$(head_of "$w/legacy")" 'legacy home still follows ordinary fast-forward behavior'
+  assert_not_contains "$FF_NUDGE_WINDOWS" fm-shared 'shared source change is not treated as native reload'
+  assert_contains "$FF_NUDGE_WINDOWS" fm-legacy 'legacy instruction change keeps its ordinary nudge'
+
+  fm_ff_after_secondmate_settled() { printf '%s\n' "$1" >> "$w/settled"; }
+  FF_SEEN_HOMES='' FF_NUDGE_WINDOWS=''
+  FM_HOME="$w/home" FM_ROOT="$w/main" \
+    sweep_live_secondmate_metas "$w/home/state" "$new" yes "$w/home/data/secondmates.md" > "$w/settled.out"
+  unset -f fm_ff_after_secondmate_settled
+  assert_grep shared "$w/settled" 'existing restart owner receives the current shared source binding'
+  assert_equals "$old" "$(secondmate_code_head_from_meta "$w/home/state/shared.meta")" 'source update does not forge a native launch receipt'
+  assert_equals '' "$FF_NUDGE_WINDOWS" 'shared source refresh does not create a redundant reread nudge'
+  FF_SEEN_HOMES=
+  out=$(FM_HOME="$w/home" FM_ROOT="$w/main" \
+    process_secondmate idle "$w/idle" '' "$new" yes "$w/home/data/secondmates.md")
+  assert_contains "$out" 'awaits an explicit launch' 'registry declaration alone is not activation'
+  assert_equals "$old" "$(head_of "$w/idle")" 'idle retained source is not a fallback update target'
+  [ ! -e "$w/home/state/idle.meta" ] || fail 'sweep activated an unlaunched binding'
+  pass 'shared-code sweep preserves old/dirty source, keeps legacy sync, and delegates native refresh to the restart owner'
+}
+
+test_shared_code_sweep_keeps_old_source_and_requires_native_refresh
 test_ff_updated
 test_ff_current
 test_ff_dirty
@@ -1438,6 +1537,7 @@ test_bootstrap_nudge_send_uses_state_override
 test_bootstrap_nudge_retry_rejects_malformed_marker_id
 test_bootstrap_nudge_failure_records_retry_marker
 test_bootstrap_nudge_retry_is_idempotent
+test_shared_code_pending_nudge_does_not_substitute_for_native_refresh
 test_bootstrap_nudge_retry_refuses_changed_home
 test_nudge_retry_uses_fresh_herdr_endpoint_after_respawn
 test_bootstrap_sweep_surfaces_skipped_home
