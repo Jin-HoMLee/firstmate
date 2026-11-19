@@ -29,6 +29,13 @@ Start with the directory layout, then use the setting reference for the behavior
 
 When `FM_HOME` is unset, most scripts use the repo root as the home.
 When it is set, scripts still run from this repo's `bin/`, while `state/`, `data/`, `config/`, and `projects/` come from `$FM_HOME`.
+Multiple operational homes can therefore use the same home-scoped command executable without copying its source or combining their private directories.
+Select the intended `FM_HOME` on every invocation, including when different homes reuse a task id; [`fm-tasks-axi.sh`](../bin/fm-tasks-axi.sh) keeps backlog writes in that home rather than the code root.
+The four-home behavior cases in [`tests/fm-tasks-axi.test.sh`](../tests/fm-tasks-axi.test.sh) and [`tests/fm-harness-precedence.test.sh`](../tests/fm-harness-precedence.test.sh) cover backlog and configuration isolation, not native agent launches.
+
+This command-addressing separation is not an installation-migration command.
+Persistent secondmate launch still uses its seeded home's working directory and tracked native integration files under the [secondmate provisioning contract](../.agents/skills/secondmate-provisioning/SKILL.md#charter-and-seed); setting `FM_HOME` alone does not switch that launch to another code root.
+Do not replace homes with links to one shared private directory, remove an old installation, or treat command-addressing tests as proof of a supported source or runtime handoff.
 
 ### Root and directory overrides
 
