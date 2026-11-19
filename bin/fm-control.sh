@@ -1047,6 +1047,10 @@ resolve_relaunch_profile() {
     if [ -n "$SECONDMATE_LOCAL_CODE_ROOT" ]; then
       secondmate_shared_code_launch_supported "$TARGET_HARNESS" "$BACKEND" || return 1
       secondmate_shared_code_native_files "$SECONDMATE_LOCAL_CODE_ROOT" || return 1
+      local shared_pi_executable
+      shared_pi_executable=$(type -P -- "$TARGET_HARNESS") || die 'selected Pi executable is unavailable before replacement'
+      secondmate_shared_code_pi_session_cli "$shared_pi_executable" || return 1
+      secondmate_shared_code_pi_session_dir "$WT" >/dev/null || return 1
     fi
   fi
   # A model or effort chosen for the previous harness does not transfer to a

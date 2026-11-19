@@ -4200,6 +4200,8 @@ if [ "$KIND" = secondmate ]; then
     [ "$RAW_LAUNCH" = 0 ] || { echo 'error: shared-code secondmates require a verified runtime, not a raw command' >&2; exit 1; }
     secondmate_shared_code_launch_supported "$HARNESS" "$BACKEND" || exit 1
     secondmate_shared_code_native_files "$SECONDMATE_CODE_ROOT" || exit 1
+    secondmate_shared_code_pi_session_cli "$PI_BIN" || exit 1
+    SECONDMATE_PI_SESSION_DIR=$(secondmate_shared_code_pi_session_dir "$PROJ_ABS" prepare) || exit 1
   fi
   WT="$PROJ_ABS"
   # Local-HEAD sync: before launch, fast-forward this secondmate's worktree to the
@@ -7624,7 +7626,12 @@ LAUNCH=${LAUNCH//__OMPEXT__/$sq_ompext}
 LAUNCH=${LAUNCH//__OMPWORKERCFG__/$sq_ompcfg}
 LAUNCH=${LAUNCH//__OPINPUT__/$sq_opinput}
 case "$HARNESS" in
-pi | pi-signed) LAUNCH=${LAUNCH//__PIBIN__/"$(shell_quote "$PI_BIN")"} ;;
+pi | pi-signed)
+  PI_COMMAND=$(shell_quote "$PI_BIN")
+  if [ -n "$SECONDMATE_CODE_ROOT" ]; then
+    PI_COMMAND="$PI_COMMAND --session-dir $(shell_quote "$SECONDMATE_PI_SESSION_DIR")"
+  fi
+  LAUNCH=${LAUNCH//__PIBIN__/"$PI_COMMAND"} ;;
 cursor) LAUNCH=${LAUNCH//__CURSORBIN__/"$(shell_quote "$CURSOR_BIN")"} ;;
 gemini) LAUNCH=${LAUNCH//__GEMINISETTINGS__/"$(shell_quote "$STATE_REAL/$ID.gemini-settings.json")"} ;;
 omp)

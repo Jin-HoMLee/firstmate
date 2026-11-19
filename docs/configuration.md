@@ -1387,6 +1387,11 @@ That source-only refresh preserves its serialized private data/config selectors 
 Untrusted checks, unknown custom bodies, or mismatched home/state/source bindings remain unchanged and keep that target out of the update's restart set; no arbitrary check is automatically re-trusted.
 Shared-code home retirement is unsupported and refused, including forced descendant cleanup; retain the homes, private project Git administration, external-copy dependencies and unresolved custody records in place.
 
+For the bounded Pi/tmux path, native conversation storage is `<home>/data/pi-sessions`, explicitly selected with `--session-dir` after verifying that the selected executable supports it.
+The directory is created owner-only (`0700`); an existing symlink, unsafe ownership/permissions, or writable parent is refused rather than repaired, including before a replacement stops its existing agent.
+This separates conversation storage without changing `PI_CODING_AGENT_DIR`, account selection or credential storage. Old sessions are retained in place, not moved, merged or rewritten.
+This is not a native settings migration or a same-session cross-root resume capability; those acceptance requirements still apply.
+
 [`tests/fm-shared-code.test.sh`](../tests/fm-shared-code.test.sh) executes rendered command suffixes with shell-only fake Pi executables for four separate homes.
 It also checks retained in-home project Git administration, nine external copies, an unmerged index, private queues and unresolved dual-claim records without repairing or relocating them.
 The existing [replacement](../tests/fm-control-relaunch.test.sh), [sync](../tests/fm-secondmate-sync.test.sh), [update](../tests/fm-update.test.sh), [consumer registration](../tests/fm-contributions-arm.test.sh), and [preservation](../tests/fm-secondmate-safety.test.sh) suites exercise their corresponding owners.

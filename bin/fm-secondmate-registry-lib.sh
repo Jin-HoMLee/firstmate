@@ -455,6 +455,43 @@ secondmate_shared_code_launch_supported() {  # <harness> <backend>
   return 1
 }
 
+secondmate_shared_code_pi_session_cli() {  # <selected-Pi-executable>
+  local help
+  if help=$("$1" --help 2>&1) && printf '%s\n' "$help" | grep -E -- '(^|[[:space:]])--session-dir([^[:alnum:]_-]|$)' >/dev/null; then
+    return 0
+  fi
+  printf 'error: selected Pi executable has no verified --session-dir support; refusing shared-code launch\n' >&2
+  return 1
+}
+
+secondmate_shared_code_pi_session_dir() {  # <home> [prepare]; requires fm-pr-lib.sh
+  local home=$1 directory mode sessions="$1/data/pi-sessions"
+  # Keep authentication/account selection unchanged. Only conversation storage
+  # moves to this home's namespace; never merge, move or rewrite old sessions.
+  for directory in "$home" "$home/data"; do
+    [ -d "$directory" ] && [ ! -L "$directory" ] && [ -O "$directory" ] \
+      && [ -r "$directory" ] && [ -w "$directory" ] && [ -x "$directory" ] || {
+      printf 'error: shared-code native session parent is unsafe: %s\n' "$directory" >&2; return 1;
+    }
+    mode=$(fm_pr_file_mode "$directory") || return 1
+    case "$mode" in ''|*[!0-7]*) return 1 ;; esac
+    [ "$((8#$mode & 0022))" -eq 0 ] || {
+      printf 'error: shared-code native session parent is writable by another user: %s\n' "$directory" >&2; return 1;
+    }
+  done
+  if [ "${2:-}" = prepare ] && [ ! -e "$sessions" ] && [ ! -L "$sessions" ]; then
+    (umask 077; mkdir -- "$sessions") || return 1
+  fi
+  if [ -e "$sessions" ] || [ -L "$sessions" ]; then
+    [ -d "$sessions" ] && [ ! -L "$sessions" ] && [ -O "$sessions" ] \
+      && [ "$(fm_pr_file_mode "$sessions")" = 700 ] || {
+      printf 'error: existing native session directory is not an owned private directory: %s\n' "$sessions" >&2
+      return 1
+    }
+  fi
+  printf '%s\n' "$sessions"
+}
+
 secondmate_shared_code_native_files() {  # <code-root>
   local root=$1 name
   for name in fm-primary-pi-watch.ts fm-primary-turnend-guard.ts; do

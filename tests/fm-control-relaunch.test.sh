@@ -2253,7 +2253,11 @@ add_shared_code_secondmate() {  # <case-dir> <id>
   printf 'pi' > "$dir/fake/command"
   printf 'pi' > "$dir/fake/becomes"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
-  fm_fake_exit0 "$dir/fakebin" pi
+  cat > "$dir/fakebin/pi" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" != --help ] || printf '%s\n' '--session-dir'
+SH
+  chmod +x "$dir/fakebin/pi"
 }
 
 test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding() {
@@ -2269,6 +2273,7 @@ test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding() {
   assert_equals "$dir/code" "$(journal_field "$dir" rlshared code_root)" 'checkpoint includes shared code separately'
   assert_grep "cd -- '$dir/code' && FM_ROOT_OVERRIDE='$dir/code'" "$dir/fake/literal" 'replacement binds cwd and root together'
   assert_grep "$dir/code/.pi/extensions/fm-primary-pi-watch.ts" "$dir/fake/literal" 'replacement native wiring comes from shared source'
+  assert_grep "--session-dir '$dir/smhome/data/pi-sessions'" "$dir/fake/literal" 'replacement keeps conversation storage with its operational home'
   assert_equals 'standing charter' "$(cat "$dir/smhome/data/charter.md")" 'standing charter stays unchanged'
   pass 'fm-control shared-code replacement preserves the same home/endpoint and rebuilds its native source binding'
 }
@@ -2286,6 +2291,31 @@ test_shared_code_relaunch_refuses_unsupported_profile_before_stop() {
   assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
   assert_equals "$before" "$(cat "$dir/home/state/rlsharedbad.meta")" 'prior metadata preserved'
   pass 'fm-control refuses an unsupported shared-code profile before stopping the existing agent'
+}
+
+test_shared_code_relaunch_refuses_unverified_native_storage_before_stop() {
+  local dir variant out rc before
+  for variant in missing-cli-flag unsafe-native-cache; do
+    dir=$(new_case "$variant" rlstorage)
+    add_shared_code_secondmate "$dir" rlstorage
+    case "$variant" in
+      missing-cli-flag) fm_fake_exit0 "$dir/fakebin" pi ;;
+      unsafe-native-cache)
+        mkdir "$dir/smhome/data/pi-sessions"
+        chmod 755 "$dir/smhome/data/pi-sessions" ;;
+    esac
+    before=$(cat "$dir/home/state/rlstorage.meta")
+    out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlstorage relaunch); rc=$?
+    expect_code 1 "$rc" "$variant must refuse before stopping the existing agent"$'\n'"$out"
+    assert_equals pi "$(cat "$dir/fake/command")" 'native storage refusal does not stop the old agent'
+    assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+    assert_equals "$before" "$(cat "$dir/home/state/rlstorage.meta")" 'prior metadata preserved'
+    case "$variant" in
+      missing-cli-flag) [ ! -e "$dir/smhome/data/pi-sessions" ] || fail 'pre-stop check created native storage' ;;
+      unsafe-native-cache) assert_equals 755 "$(fm_pr_file_mode "$dir/smhome/data/pi-sessions")" 'pre-stop check did not change existing permissions' ;;
+    esac
+  done
+  pass 'fm-control refuses unverified CLI/private session storage before stopping an existing shared-code agent'
 }
 
 test_shared_code_relaunch_refuses_binding_removal_before_stop() {
@@ -3419,6 +3449,7 @@ test_prepublication_abort_retires_replacement_wiring_and_busy_state
 test_journal_records_the_checkpoint_it_proved
 test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding
 test_shared_code_relaunch_refuses_unsupported_profile_before_stop
+test_shared_code_relaunch_refuses_unverified_native_storage_before_stop
 test_shared_code_relaunch_refuses_binding_removal_before_stop
 test_shared_code_relaunch_refuses_missing_native_wiring_before_stop
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter

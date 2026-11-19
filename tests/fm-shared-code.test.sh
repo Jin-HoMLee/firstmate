@@ -7,6 +7,8 @@ set -eu
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
 . "$ROOT/bin/fm-secondmate-registry-lib.sh"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$ROOT/bin/fm-pr-lib.sh"
 
 fm_git_identity fmtest fmtest@example.com
 TMP_ROOT=$(fm_test_tmproot fm-shared-code)
@@ -54,8 +56,13 @@ SH
   cat > "$w/fakebin/pi" <<'SH'
 #!/usr/bin/env bash
 set -eu
-case "${1:-}" in --help) printf '%s\n' '--approve --tui-mode'; exit 0 ;; esac
-printf 'cwd=%s\nhome=%s\nroot=%s\nharness=%s\n' "$(pwd -P)" "$FM_HOME" "$FM_ROOT_OVERRIDE" "$FM_PI_HARNESS" > "$FM_FAKE_WORLD/probe"
+case "${1:-}" in --help)
+  printf '%s\n' '--approve --tui-mode'
+  [ -f "$FM_FAKE_WORLD/no-session-dir" ] || printf '%s\n' '--session-dir'
+  exit 0 ;;
+esac
+printf 'cwd=%s\nhome=%s\nroot=%s\nharness=%s\naccount_dir=%s\n' "$(pwd -P)" "$FM_HOME" "$FM_ROOT_OVERRIDE" "$FM_PI_HARNESS" \
+  "${PI_CODING_AGENT_DIR:-unset}" > "$FM_FAKE_WORLD/probe"
 printf '%s\n' "$@" >> "$FM_FAKE_WORLD/probe"
 SH
   chmod +x "$w/fakebin/tmux" "$w/fakebin/pi"
@@ -185,12 +192,16 @@ test_four_homes_share_rendered_code_not_private_state_or_history() {
     native="$marker${launch#*"$marker"}"
     # Execute only the verbatim native-command suffix, with a shell-only fake Pi.
     # No reporter helper, real agent, extension or service is started here.
-    (cd "$w/$id" && HOME="$w/user-home" FM_FAKE_WORLD="$w" /bin/bash -c "$native") \
+    (cd "$w/$id" && HOME="$w/user-home" PI_CODING_AGENT_DIR="$w/selected-account" FM_FAKE_WORLD="$w" /bin/bash -c "$native") \
       || fail 'rendered native-command suffix failed'
     assert_grep "cwd=$w/code" "$w/probe" 'native command uses shared cwd'
     assert_grep "home=$w/$id" "$w/probe" 'native command uses its own operational home'
     assert_grep "root=$w/code" "$w/probe" 'native command retains explicit shared root'
     assert_grep "harness=$harness" "$w/probe" 'selected Pi flavor remains explicit'
+    assert_grep "account_dir=$w/selected-account" "$w/probe" 'private conversation storage does not change account selection'
+    assert_grep --session-dir "$w/probe" 'native command explicitly selects its conversation namespace'
+    assert_grep "$w/$id/data/pi-sessions" "$w/probe" 'native command uses a distinct private conversation directory'
+    assert_equals 700 "$(fm_pr_file_mode "$w/$id/data/pi-sessions")" 'new conversation directory is private'
     assert_grep "$w/code/.pi/extensions/fm-primary-pi-watch.ts" "$w/probe" 'watch extension comes from shared source'
     assert_grep "$w/code/.pi/extensions/fm-primary-turnend-guard.ts" "$w/probe" 'turn-end extension comes from shared source'
     assert_equals "$before_head" "$(git -C "$w/$id" rev-parse HEAD)" 'retained home HEAD unchanged'
@@ -200,6 +211,42 @@ test_four_homes_share_rendered_code_not_private_state_or_history() {
     [ ! -e "$w/code/data/private-sentinel" ] || fail 'private state leaked into shared code'
   done
   pass 'four retained homes render/execute isolated Pi-family commands from one code root without syncing old history'
+}
+
+test_unsupported_or_unsafe_session_storage_refuses_before_endpoint_creation() {
+  local w variant rc sessions before=
+  for variant in missing-flag permissive-cache symlink-cache writable-parent; do
+    w=$(new_shared_world "$variant")
+    add_retained_home "$w" sm
+    sessions="$w/sm/data/pi-sessions"
+    case "$variant" in
+      missing-flag) touch "$w/no-session-dir" ;;
+      permissive-cache)
+        mkdir "$sessions"; chmod 755 "$sessions"
+        printf 'kept native history\n' > "$sessions/kept"
+        before=$(git hash-object "$sessions/kept") ;;
+      symlink-cache)
+        mkdir "$w/foreign"
+        printf 'kept foreign history\n' > "$w/foreign/kept"
+        before=$(git hash-object "$w/foreign/kept")
+        ln -s "$w/foreign" "$sessions" ;;
+      writable-parent) chmod g+w "$w/sm/data" ;;
+    esac
+    rc=0
+    shared_spawn "$w" sm pi > "$w/refusal.log" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || fail "$variant native session setup was accepted"
+    [ ! -e "$w/windows" ] || fail "$variant created an endpoint before refusing"
+    case "$variant" in
+      missing-flag|writable-parent) [ ! -e "$sessions" ] || fail 'refusal created native storage' ;;
+      permissive-cache)
+        assert_equals 755 "$(fm_pr_file_mode "$sessions")" 'existing permissions are not silently changed'
+        assert_equals "$before" "$(git hash-object "$sessions/kept")" 'old cache bytes unchanged' ;;
+      symlink-cache)
+        [ -L "$sessions" ] || fail 'foreign native-storage pointer was replaced'
+        assert_equals "$before" "$(git hash-object "$w/foreign/kept")" 'foreign cache bytes unchanged' ;;
+    esac
+  done
+  pass 'unverified CLI and unsafe native session storage refuse before endpoint creation without account/cache repair'
 }
 
 test_retained_project_admin_and_unresolved_custody_are_not_relocated() {
@@ -282,5 +329,6 @@ test_binding_is_sticky_and_recorded_recovery_is_scoped
 test_binding_metadata_is_unambiguous
 test_native_axes_are_explicitly_bounded
 test_four_homes_share_rendered_code_not_private_state_or_history
+test_unsupported_or_unsafe_session_storage_refuses_before_endpoint_creation
 test_retained_project_admin_and_unresolved_custody_are_not_relocated
 test_missing_native_source_refuses_before_endpoint_creation

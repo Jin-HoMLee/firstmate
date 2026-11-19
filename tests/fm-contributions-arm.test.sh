@@ -45,6 +45,7 @@ consumer_call() {
   local w=$1 root=$2; shift 2
   HOME="$w/user-home" PATH="$w/fakebin:$PATH" FM_TEST_REAL_ROOT="$ROOT" \
     FM_TEST_CONSUMER_PROBE="$w/probe" FM_TEST_NETWORK_PROBE="$w/network" \
+    FM_TEST_SELECTOR_MARKER="$w/unexpected-side-effect" \
     FM_HOME="$w/home" FM_ROOT_OVERRIDE="$root" FM_STATE_OVERRIDE="$w/home/state" \
     FM_DATA_OVERRIDE="$w/home/data" FM_CONFIG_OVERRIDE="$w/home/config" \
     FM_CONTRIBUTIONS_BUDGET=1 FM_CONTRIBUTIONS_REPLY_AGE=999 \
@@ -124,7 +125,7 @@ test_untrusted_or_custom_checks_are_preserved_and_refused() {
     case "$variant" in
       custom-no-newline) printf '# preserved custom suffix' >> "$w/home/state/contributions.check.sh" ;;
       custom-selector)
-        awk -v target="$w/unexpected-side-effect" '/^export FM_DATA_OVERRIDE=/ {print "export FM_DATA_OVERRIDE=$(touch " target ")";next}{print}' \
+        awk '/^export FM_DATA_OVERRIDE=/ {print "export FM_DATA_OVERRIDE=$(touch \"$FM_TEST_SELECTOR_MARKER\")";next}{print}' \
           "$w/home/state/contributions.check.sh" > "$w/changed-check"
         chmod 700 "$w/changed-check"
         mv "$w/changed-check" "$w/home/state/contributions.check.sh" ;;
