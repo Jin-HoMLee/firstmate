@@ -589,7 +589,7 @@ process_secondmate() {
     if ! secondmate_shared_code_launch_supported \
       "$(awk -F= '$1 == "harness" {print $2}' "$meta")" \
       "$(awk -F= '$1 == "backend" {v=$2} END {print (v == "" ? "tmux" : v)}' "$meta")" \
-      || ! secondmate_shared_code_native_files "$code_root"; then
+      || ! secondmate_shared_code_native_files "$code_root" "$home_real"; then
       echo "secondmate $id: skipped: unsupported shared-code native refresh"
       return 0
     fi

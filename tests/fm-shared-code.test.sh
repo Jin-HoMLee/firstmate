@@ -249,6 +249,59 @@ test_unsupported_or_unsafe_session_storage_refuses_before_endpoint_creation() {
   pass 'unverified CLI and unsafe native session storage refuse before endpoint creation without account/cache repair'
 }
 
+test_native_project_configuration_is_not_silently_retargeted() {
+  local w location name file before rc directory
+  for location in code sm; do
+    for name in settings.json mcp.json SYSTEM.md APPEND_SYSTEM.md; do
+      w=$(new_shared_world "native-$location-$name")
+      add_retained_home "$w" sm
+      mkdir -p "$w/$location/.pi"
+      file="$w/$location/.pi/$name"
+      # Deliberately not parseable configuration: the preflight must neither
+      # inspect values nor pass them to a native loader to decide preservation.
+      printf 'private-native-sentinel %s not-json\n' "$name" > "$file"
+      before=$(git hash-object "$file")
+      rc=0
+      shared_spawn "$w" sm pi > "$w/refusal.log" 2>&1 || rc=$?
+      [ "$rc" -ne 0 ] || fail "$location/$name was silently retargeted"
+      assert_grep 'native configuration mapping is unresolved' "$w/refusal.log" 'missing mapping is reported'
+      assert_no_grep private-native-sentinel "$w/refusal.log" 'private native values are not exposed'
+      assert_equals "$before" "$(git hash-object "$file")" 'native config is not changed, copied or repaired'
+      [ ! -e "$w/windows" ] || fail 'native config conflict created an endpoint'
+      [ ! -e "$w/sm/data/pi-sessions" ] || fail 'native config conflict prepared storage before refusal'
+    done
+  done
+  for name in equal-relative-paths dangling-file linked-directory; do
+    w=$(new_shared_world "$name")
+    add_retained_home "$w" sm
+    mkdir -p "$w/sm/.pi"
+    case "$name" in
+      equal-relative-paths)
+        printf '{"extensions":["./private-extension.ts"]}\n' > "$w/code/.pi/settings.json"
+        cp "$w/code/.pi/settings.json" "$w/sm/.pi/settings.json" ;;
+      dangling-file) ln -s "$w/absent-private-config" "$w/sm/.pi/settings.json" ;;
+      linked-directory)
+        mkdir "$w/foreign-pi"
+        # This empty fixture directory was just made above, not retained data.
+        rmdir "$w/sm/.pi"
+        ln -s "$w/foreign-pi" "$w/sm/.pi" ;;
+    esac
+    rc=0
+    shared_spawn "$w" sm pi > "$w/refusal.log" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || fail "$name bypassed native configuration mapping"
+    [ ! -e "$w/windows" ] || fail "$name created an endpoint"
+    case "$name" in
+      equal-relative-paths)
+        cmp "$w/code/.pi/settings.json" "$w/sm/.pi/settings.json" || fail 'equal config changed' ;;
+      dangling-file) assert_equals "$w/absent-private-config" "$(readlink "$w/sm/.pi/settings.json")" 'dangling private pointer retained' ;;
+      linked-directory)
+        directory=$(readlink "$w/sm/.pi")
+        assert_equals "$w/foreign-pi" "$directory" 'private configuration directory pointer retained' ;;
+    esac
+  done
+  pass 'native project settings and system prompts refuse without a mapping, preserving bytes/pointers before launch'
+}
+
 test_retained_project_admin_and_unresolved_custody_are_not_relocated() {
   local w id i project external common before_worktrees before_index before_config before_unmerged
   local before_custody after_custody base ours theirs file
@@ -330,5 +383,6 @@ test_binding_metadata_is_unambiguous
 test_native_axes_are_explicitly_bounded
 test_four_homes_share_rendered_code_not_private_state_or_history
 test_unsupported_or_unsafe_session_storage_refuses_before_endpoint_creation
+test_native_project_configuration_is_not_silently_retargeted
 test_retained_project_admin_and_unresolved_custody_are_not_relocated
 test_missing_native_source_refuses_before_endpoint_creation

@@ -2318,6 +2318,29 @@ test_shared_code_relaunch_refuses_unverified_native_storage_before_stop() {
   pass 'fm-control refuses unverified CLI/private session storage before stopping an existing shared-code agent'
 }
 
+test_shared_code_relaunch_preserves_unmapped_native_settings_before_stop() {
+  local dir location file before_settings before_meta out rc
+  for location in code smhome; do
+    dir=$(new_case "native-settings-$location" rlsettings)
+    add_shared_code_secondmate "$dir" rlsettings
+    mkdir -p "$dir/$location/.pi"
+    file="$dir/$location/.pi/settings.json"
+    printf '{"shellCommandPrefix":"private-native-sentinel"}\n' > "$file"
+    before_settings=$(git hash-object "$file")
+    before_meta=$(cat "$dir/home/state/rlsettings.meta")
+    out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsettings relaunch); rc=$?
+    expect_code 1 "$rc" 'unmapped native settings must refuse before replacement'
+    assert_contains "$out" 'native configuration mapping is unresolved' 'configuration boundary is explicit'
+    assert_not_contains "$out" private-native-sentinel 'configuration values never appear in refusal'
+    assert_equals pi "$(cat "$dir/fake/command")" 'existing agent remains running'
+    assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+    assert_equals "$before_meta" "$(cat "$dir/home/state/rlsettings.meta")" 'prior launch record preserved'
+    assert_equals "$before_settings" "$(git hash-object "$file")" 'native settings unchanged'
+    [ ! -e "$dir/smhome/data/pi-sessions" ] || fail 'native settings refusal created conversation storage'
+  done
+  pass 'fm-control preserves unmapped home/shared-root native settings and the existing agent before replacement'
+}
+
 test_shared_code_relaunch_refuses_binding_removal_before_stop() {
   local dir out rc before
   dir=$(new_case shared-code-removed rlsharedremoved)
@@ -3450,6 +3473,7 @@ test_journal_records_the_checkpoint_it_proved
 test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding
 test_shared_code_relaunch_refuses_unsupported_profile_before_stop
 test_shared_code_relaunch_refuses_unverified_native_storage_before_stop
+test_shared_code_relaunch_preserves_unmapped_native_settings_before_stop
 test_shared_code_relaunch_refuses_binding_removal_before_stop
 test_shared_code_relaunch_refuses_missing_native_wiring_before_stop
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter

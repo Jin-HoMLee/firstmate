@@ -492,8 +492,27 @@ secondmate_shared_code_pi_session_dir() {  # <home> [prepare]; requires fm-pr-li
   printf '%s\n' "$sessions"
 }
 
-secondmate_shared_code_native_files() {  # <code-root>
-  local root=$1 name
+secondmate_shared_code_native_files() {  # <code-root> <retained-home>
+  local root=$1 home=$2 name directory
+  # Pi's project settings and system prompts follow native cwd, not FM_HOME.
+  # No supported per-home project-settings mapping is implemented here. Refuse
+  # before replacement instead of losing home settings or importing the source
+  # owner's private settings. Presence checks only: never parse, merge or copy.
+  # Even equal bytes can contain relative resource paths with different meaning.
+  for directory in "$root/.pi" "$home/.pi"; do
+    if [ -e "$directory" ] || [ -L "$directory" ]; then
+      [ -d "$directory" ] && [ ! -L "$directory" ] || {
+        printf 'error: shared-code native configuration directory is not a plain directory: %s; retained files unchanged\n' "$directory" >&2
+        return 1
+      }
+      for name in settings.json mcp.json SYSTEM.md APPEND_SYSTEM.md; do
+        if [ -e "$directory/$name" ] || [ -L "$directory/$name" ]; then
+          printf 'error: shared-code native configuration mapping is unresolved: %s; retained files unchanged\n' "$directory/$name" >&2
+          return 1
+        fi
+      done
+    fi
+  done
   for name in fm-primary-pi-watch.ts fm-primary-turnend-guard.ts; do
     [ -f "$root/.pi/extensions/$name" ] && [ -r "$root/.pi/extensions/$name" ] || {
       printf 'error: shared-code primary extension is unavailable: %s\n' "$root/.pi/extensions/$name" >&2

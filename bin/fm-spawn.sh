@@ -4199,7 +4199,7 @@ if [ "$KIND" = secondmate ]; then
   if [ -n "$SECONDMATE_CODE_ROOT" ]; then
     [ "$RAW_LAUNCH" = 0 ] || { echo 'error: shared-code secondmates require a verified runtime, not a raw command' >&2; exit 1; }
     secondmate_shared_code_launch_supported "$HARNESS" "$BACKEND" || exit 1
-    secondmate_shared_code_native_files "$SECONDMATE_CODE_ROOT" || exit 1
+    secondmate_shared_code_native_files "$SECONDMATE_CODE_ROOT" "$PROJ_ABS" || exit 1
     secondmate_shared_code_pi_session_cli "$PI_BIN" || exit 1
     SECONDMATE_PI_SESSION_DIR=$(secondmate_shared_code_pi_session_dir "$PROJ_ABS" prepare) || exit 1
   fi

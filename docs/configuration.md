@@ -1389,8 +1389,12 @@ Shared-code home retirement is unsupported and refused, including forced descend
 
 For the bounded Pi/tmux path, native conversation storage is `<home>/data/pi-sessions`, explicitly selected with `--session-dir` after verifying that the selected executable supports it.
 The directory is created owner-only (`0700`); an existing symlink, unsafe ownership/permissions, or writable parent is refused rather than repaired, including before a replacement stops its existing agent.
-This separates conversation storage without changing `PI_CODING_AGENT_DIR`, account selection or credential storage. Old sessions are retained in place, not moved, merged or rewritten.
-This is not a native settings migration or a same-session cross-root resume capability; those acceptance requirements still apply.
+This separates conversation storage without changing `PI_CODING_AGENT_DIR`, account selection or credential storage.
+Old sessions are retained in place, not moved, merged or rewritten.
+The existing native preflight refuses `.pi/settings.json`, `.pi/mcp.json`, `.pi/SYSTEM.md` or `.pi/APPEND_SYSTEM.md` at either the retained home or shared root because no per-home mapping for those cwd-bound files is implemented.
+It checks presence only, including dangling pointers, without reading values, copying files or treating equal bytes as equivalent relative resource paths.
+A non-directory or symlinked `.pi` is also refused before an existing agent is stopped or a refresh target is marked settled.
+This is not a complete resource/extension ownership check, a native settings migration or a same-session cross-root resume capability; those acceptance requirements still apply.
 
 [`tests/fm-shared-code.test.sh`](../tests/fm-shared-code.test.sh) executes rendered command suffixes with shell-only fake Pi executables for four separate homes.
 It also checks retained in-home project Git administration, nine external copies, an unmerged index, private queues and unresolved dual-claim records without repairing or relocating them.

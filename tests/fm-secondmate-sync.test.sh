@@ -1520,7 +1520,20 @@ test_shared_code_sweep_keeps_old_source_and_requires_native_refresh() {
   assert_contains "$out" 'awaits an explicit launch' 'registry declaration alone is not activation'
   assert_equals "$old" "$(head_of "$w/idle")" 'idle retained source is not a fallback update target'
   [ ! -e "$w/home/state/idle.meta" ] || fail 'sweep activated an unlaunched binding'
-  pass 'shared-code sweep preserves old/dirty source, keeps legacy sync, and delegates native refresh to the restart owner'
+
+  printf '{"shellCommandPrefix":"private-native-sentinel"}\n' > "$w/shared/.pi/settings.json"
+  fm_ff_after_secondmate_settled() { printf '%s\n' "$1" >> "$w/rejected-settled"; }
+  FF_SEEN_HOMES=''
+  FM_HOME="$w/home" FM_ROOT="$w/main" \
+    process_secondmate shared "$w/shared" '' "$new" yes "$w/home/data/secondmates.md" > "$w/config-refusal.out" 2>&1
+  unset -f fm_ff_after_secondmate_settled
+  assert_grep 'native configuration mapping is unresolved' "$w/config-refusal.out" 'refresh retains native configuration conflict'
+  assert_no_grep private-native-sentinel "$w/config-refusal.out" 'refresh does not expose native settings values'
+  [ ! -e "$w/rejected-settled" ] || fail 'unmapped native settings reached the settled/restart owner'
+  assert_grep private-native-sentinel "$w/shared/.pi/settings.json" 'native configuration retained in place'
+  assert_equals "$old" "$(head_of "$w/shared")" 'native conflict does not change old source'
+  assert_equals "$before" "$(git -C "$w/shared" diff HEAD -- AGENTS.md)" 'native conflict preserves unfinished work'
+  pass 'shared-code sweep preserves old/dirty source, retains native config conflicts, and delegates supported refresh to the restart owner'
 }
 
 test_shared_code_sweep_keeps_old_source_and_requires_native_refresh
