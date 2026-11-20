@@ -71,50 +71,26 @@ function rawLexErrorMention(command, root) {
 function gitPushInfo(position) {
   if (!position.command || base(position.command.value) !== "git") return null;
   const args = position.words.slice(position.index + 1);
-  let afterPush = false;
   let expectC = false;
+  let expectValue = false;
   let anchoredDirectory = false;
-  let expectRepo = false;
-  let remote = "";
   for (const word of args) {
     const arg = word.value;
     if (expectC) {
-      anchoredDirectory = word.literal && isAbsolute(arg);
+      anchoredDirectory = word.literal && (isAbsolute(arg) || anchoredDirectory);
       expectC = false;
       continue;
     }
-    if (!afterPush) {
-      if (arg === "-C") expectC = true;
-      else if (arg.length > 2 && arg.startsWith("-C")) anchoredDirectory = word.literal && isAbsolute(arg.slice(2));
-      else if (arg === "push") afterPush = true;
+    if (expectValue) {
+      expectValue = false;
       continue;
     }
-    if (expectRepo) {
-      remote = arg;
-      expectRepo = false;
-      break;
-    }
-    if (arg.startsWith("--repo=")) {
-      remote = arg.slice("--repo=".length);
-      break;
-    }
-    if (arg === "--repo") {
-      expectRepo = true;
-      continue;
-    }
-    if (arg.startsWith("-")) continue;
-    remote = arg;
-    break;
+    if (arg === "-C") expectC = true;
+    else if (arg.length > 2 && arg.startsWith("-C")) anchoredDirectory = word.literal && (isAbsolute(arg.slice(2)) || anchoredDirectory);
+    else if (arg === "-c" || arg === "--config-env") expectValue = true;
+    else if (arg === "push") return { anchoredDirectory };
   }
-  if (!afterPush) return null;
-  return { anchoredDirectory, remote };
-}
-
-function pushDestinationExplicit(info) {
-  if (info.anchoredDirectory) return true;
-  const remote = info.remote || "";
-  if (remote.includes("://")) return true;
-  return /^(?:git@(?:github|ssh\.github)\.com:|(?:github|ssh\.github)\.com\/)/.test(remote);
+  return null;
 }
 
 function isDirectoryChange(position) {
@@ -138,7 +114,7 @@ function decision(command, root = defaultRoot) {
   for (const { position } of positions) {
     if (isDirectoryChange(position)) directoryChanged = true;
     const info = gitPushInfo(position);
-    if (info && !pushDestinationExplicit(info) && directoryChanged) {
+    if (info && !info.anchoredDirectory && directoryChanged) {
       return {
         decision: "deny",
         code: "protected-upstream-write",

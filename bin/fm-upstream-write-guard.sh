@@ -184,6 +184,97 @@ set_target() {
   : "$2"
 }
 
+gh_option_kind() {
+  local top=$1 sub=$2 option=$3
+  GH_OPTION_KIND=unknown
+  case "$top/$sub/$option" in repo/create/-h|repo/edit/-h) GH_OPTION_KIND=value; return ;; esac
+  case "$option" in
+    -h|--help|--version) GH_OPTION_KIND=help; return ;;
+    -R|--repo) GH_OPTION_KIND=repo; return ;;
+  esac
+  if [ "$top" = api ]; then
+    case "$option" in
+      -X|--method) GH_OPTION_KIND=method ;;
+      -f|-F|--field|--raw-field) GH_OPTION_KIND=field ;;
+      --input) GH_OPTION_KIND=input ;;
+      -H|--header|-q|--jq|-t|--template|--hostname|--cache|-p|--preview) GH_OPTION_KIND=value ;;
+      -i|--include|--silent|--paginate|--slurp|--verbose) GH_OPTION_KIND=boolean ;;
+    esac
+    return
+  fi
+  case "$top/$sub/$option" in
+    pr/create/-d|pr/create/--draft|pr/create/--fill|pr/create/--fill-first|pr/create/--fill-verbose|pr/create/-w|pr/create/--web|pr/create/-e|pr/create/--editor|pr/create/--dry-run|pr/create/--no-maintainer-edit)
+      GH_OPTION_KIND=boolean ;;
+    pr/create/-t|pr/create/--title|pr/create/-b|pr/create/--body|pr/create/-F|pr/create/--body-file|pr/create/-B|pr/create/--base|pr/create/-H|pr/create/--head|pr/create/-r|pr/create/--reviewer|pr/create/-a|pr/create/--assignee|pr/create/-l|pr/create/--label|pr/create/-m|pr/create/--milestone|pr/create/-p|pr/create/--project|pr/create/--recover)
+      GH_OPTION_KIND=value ;;
+    repo/create/-t|repo/create/--template|repo/view/-t|repo/view/--template) GH_OPTION_KIND=value ;;
+    repo/edit/--template) GH_OPTION_KIND=boolean ;;
+  esac
+}
+
+normalize_gh_arguments() {
+  local top='' sub='' arg option value tail kind attached options=1
+  GH_ARGS=() GH_HELP=0 GH_OPTIONS_KNOWN=1
+  while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
+    if [ "$options" -eq 0 ]; then GH_ARGS+=("$arg"); continue; fi
+    case "$arg" in
+      --) options=0; GH_ARGS+=("$arg"); continue ;;
+      -?*) ;;
+      *)
+        GH_ARGS+=("$arg")
+        if [ -z "$top" ]; then top=$arg; elif [ -z "$sub" ]; then sub=$arg; fi
+        continue
+        ;;
+    esac
+    tail=$arg
+    while [ -n "$tail" ]; do
+      value='' attached=0
+      case "$tail" in
+        --*)
+          option=${tail%%=*}
+          case "$tail" in *=*) value=${tail#*=}; attached=1 ;; esac
+          tail=''
+          ;;
+        *)
+          tail=${tail#-}
+          option=-${tail%"${tail#?}"}
+          tail=${tail#?}
+          ;;
+      esac
+      gh_option_kind "$top" "$sub" "$option"
+      kind=$GH_OPTION_KIND
+      case "$kind" in
+        method|field|input|value|repo)
+          if [ -n "$tail" ]; then value=${tail#=}; attached=1; tail=''; fi
+          if [ "$attached" -eq 0 ]; then
+            if [ "$#" -eq 0 ]; then GH_OPTIONS_KNOWN=0; GH_ARGS+=("$option"); break; fi
+            value=$1
+            shift
+          fi
+          GH_ARGS+=("$option" "$value")
+          ;;
+        boolean|help)
+          case "$tail" in =*) value=${tail#=}; attached=1; tail='' ;; esac
+          if [ "$attached" -eq 1 ]; then
+            GH_ARGS+=("$option=$value")
+            case "$value" in true|false) ;; *) GH_OPTIONS_KNOWN=0 ;; esac
+          else
+            GH_ARGS+=("$option")
+          fi
+          if [ "$kind" = help ] && { [ "$attached" -eq 0 ] || [ "$value" = true ]; }; then GH_HELP=1; fi
+          ;;
+        *)
+          GH_OPTIONS_KNOWN=0
+          GH_ARGS+=("$arg")
+          tail=''
+          ;;
+      esac
+    done
+  done
+}
+
 parse_top_sub_and_target() {
   local tool=$1 arg expect_repo=0 expect_api_value=0 seen_top=0 seen_sub=0 previous=
   shift
@@ -193,19 +284,17 @@ parse_top_sub_and_target() {
       expect_api_value=0
       continue
     fi
-    if [ "$TOP" = api ]; then
-      case "$arg" in
-        -X|--method|-H|--header|-f|--raw-field|-F|--field|--input|-q|--jq|-t|--template|--hostname|--cache|-p|--preview)
-          expect_api_value=1
-          continue
-          ;;
-      esac
-    fi
     if [ "$expect_repo" -eq 1 ]; then
       set_target "$arg" explicit-repository
       expect_repo=0
       previous=$arg
       continue
+    fi
+    if [ "$TOP" = api ]; then
+      gh_option_kind "$TOP" "$SUB" "$arg"
+      case "$GH_OPTION_KIND" in
+        method|field|input|value) expect_api_value=1; continue ;;
+      esac
     fi
     case "$arg" in
       -R|--repo) expect_repo=1; previous=$arg; continue ;;
@@ -237,11 +326,9 @@ parse_top_sub_and_target() {
   [ "$expect_repo" -eq 0 ] || TARGET=AMBIGUOUS
 
   if [ "$TOP" = api ]; then
-    for arg in "$@"; do
-      case "$(lower "$arg")" in
-        /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) set_target "$arg" api-path ;;
-      esac
-    done
+    case "$(lower "$SUB")" in
+      /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) set_target "$SUB" api-path ;;
+    esac
   fi
 
   if [ "$TOP" = repo ]; then
@@ -257,40 +344,21 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg subsub method=GET method_explicit=0 has_fields=0 query='' query_seen=0 expect_value=0 org_repo_create=0 api_endpoint api_host api_path
+  local tool=$1 arg subsub method=GET method_explicit=0 has_fields=0 query='' query_seen=0 org_repo_create=0 api_endpoint api_host api_path
   local expect_api_value='' field='' has_input=0
   shift
   MUTATION=0
   REPO_SCOPED=0
+  ARGUMENT_ERROR=''
+  normalize_gh_arguments "$@"
+  set -- "${GH_ARGS[@]+"${GH_ARGS[@]}"}"
   parse_top_sub_and_target "$tool" "$@"
   if [ -n "$API_METHOD" ]; then method=$API_METHOD; method_explicit=1; fi
-
-  if [ "$TOP" != api ]; then
-    for arg in "$@"; do
-      if [ "$expect_value" -eq 1 ]; then
-        expect_value=0
-        continue
-      fi
-      case "$arg" in
-        --help|--version) return 0 ;;
-        -h)
-          case "$TOP/$SUB" in
-            repo/create|repo/edit) expect_value=1 ;;
-            *) return 0 ;;
-          esac
-          ;;
-        --) break ;;
-        -*)
-          case "$arg" in
-            *=*) ;;
-            --*) expect_value=1 ;;
-            -?) expect_value=1 ;;
-            -??*) ;;
-          esac
-          ;;
-      esac
-    done
+  if [ "$TOP" = api ] && [ "$GH_OPTIONS_KNOWN" -eq 0 ]; then
+    ARGUMENT_ERROR='unsupported or incomplete gh api options; use unambiguous supported options'
+    return 0
   fi
+  if [ "$GH_OPTIONS_KNOWN" -eq 1 ] && [ "$GH_HELP" -eq 1 ]; then return 0; fi
   [ -n "$TOP" ] || return 0
 
   case "$TOP" in
@@ -350,6 +418,10 @@ classify_gh() {
       api_endpoint=${api_endpoint%%\?*}
       api_endpoint=${api_endpoint%%\#*}
       case "$api_endpoint" in graphql|/graphql) SUB=graphql ;; esac
+      case "$api_endpoint" in
+        /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
+        orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
+      esac
       for arg in "$@"; do
         field=''
         if [ -n "$expect_api_value" ]; then
@@ -359,25 +431,13 @@ classify_gh() {
           esac
           expect_api_value=''
         else
-          api_endpoint=$(lower "$arg")
-          api_endpoint=${api_endpoint%%\?*}
-          api_endpoint=${api_endpoint%%\#*}
-          case "$api_endpoint" in
-            /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
-            orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
-          esac
-          case "$arg" in
-            --help|--version|-h) return 0 ;;
-            --) break ;;
-            -X|--method) expect_api_value=method; method_explicit=1 ;;
-            -X=*|--method=*) method=${arg#*=}; method_explicit=1 ;;
-            -X?*) method=${arg#-X}; method_explicit=1 ;;
-            -f|-F|--field|--raw-field) has_fields=1; expect_api_value=field ;;
-            -f=*|-F=*|--field=*|--raw-field=*) has_fields=1; field=${arg#*=} ;;
-            -f?*|-F?*) has_fields=1; field=${arg#??} ;;
-            --input) has_fields=1; has_input=1; expect_api_value=other ;;
-            --input=*) has_fields=1; has_input=1 ;;
-            -H|--header|-q|--jq|-t|--template|--hostname|--cache|-p|--preview|-R|--repo) expect_api_value=other ;;
+          [ "$arg" != -- ] || break
+          gh_option_kind "$TOP" "$SUB" "$arg"
+          case "$GH_OPTION_KIND" in
+            method) expect_api_value=method; method_explicit=1 ;;
+            field) has_fields=1; expect_api_value=field ;;
+            input) has_fields=1; has_input=1; expect_api_value=other ;;
+            value|repo) expect_api_value=other ;;
           esac
         fi
         case "$field" in
@@ -450,6 +510,7 @@ check_gh() {
   local tool=$1
   shift
   classify_gh "$tool" "$@"
+  if [ -n "$ARGUMENT_ERROR" ]; then refuse_reason "$ARGUMENT_ERROR"; return 2; fi
   if [ "$TARGET" = AMBIGUOUS ]; then
     refuse_reason "conflicting or incomplete repository selectors; refusing before any GitHub operation"
     return 2
@@ -473,7 +534,7 @@ check_gh() {
   return 0
 }
 
-GIT_REPO_DIR='' GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
+GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
 config_env_names_destination() {
   case "$(lower "${1%%=*}")" in
     remote.pushdefault|branch.*.remote|branch.*.pushremote|remote.*.url|remote.*.pushurl|url.*.insteadof|url.*.pushinsteadof) return 0 ;;
@@ -483,15 +544,14 @@ config_env_names_destination() {
 
 parse_git_push() {
   local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 fail_closed=0 candidates url target rule key prefix base
-  local -a c_overrides=()
-  GIT_REPO_DIR=$PWD
+  local -a global_args=()
   GIT_REMOTE=
   GIT_REMOTE_URL=
   GIT_TARGET=
   for arg in "$@"; do
-    if [ "$expect_c" -eq 1 ]; then GIT_REPO_DIR=$arg; expect_c=0; continue; fi
+    if [ "$expect_c" -eq 1 ]; then global_args+=( -C "$arg" ); expect_c=0; continue; fi
     if [ "$expect_c_override" -eq 1 ]; then
-      c_overrides+=( -c "$arg" )
+      global_args+=( -c "$arg" )
       expect_c_override=0
       continue
     fi
@@ -503,7 +563,7 @@ parse_git_push() {
     if [ "$after_push" -eq 0 ]; then
       case "$arg" in
         -C) expect_c=1 ;;
-        -C?*) GIT_REPO_DIR=${arg#-C} ;;
+        -C?*) global_args+=( -C "${arg#-C}" ) ;;
         -c) expect_c_override=1 ;;
         --config-env) expect_config_env=1 ;;
         --config-env=*) config_env_names_destination "${arg#--config-env=}" && config_env_dest=1 ;;
@@ -526,12 +586,13 @@ parse_git_push() {
     esac
   done
   [ "$after_push" -eq 1 ] || return 1
+  [ "$expect_c" -eq 0 ] && [ "$expect_c_override" -eq 0 ] || return 3
   [ "$config_env_dest" -eq 0 ] || return 3
   [ "$fail_closed" -eq 0 ] || return 3
   if [ -z "$GIT_REMOTE" ]; then
-    GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".pushRemote 2>/dev/null || true)
-    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
-    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get branch."$(git -C "$GIT_REPO_DIR" branch --show-current 2>/dev/null)".remote 2>/dev/null || true)
+    GIT_REMOTE=$(git "${global_args[@]+"${global_args[@]}"}" config --get branch."$(git "${global_args[@]+"${global_args[@]}"}" branch --show-current 2>/dev/null)".pushRemote 2>/dev/null || true)
+    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git "${global_args[@]+"${global_args[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
+    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git "${global_args[@]+"${global_args[@]}"}" config --get branch."$(git "${global_args[@]+"${global_args[@]}"}" branch --show-current 2>/dev/null)".remote 2>/dev/null || true)
     [ -n "$GIT_REMOTE" ] || GIT_REMOTE=origin
   fi
   case "$GIT_REMOTE" in
@@ -550,11 +611,11 @@ parse_git_push() {
             fi
             ;;
         esac
-      done <<< "$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null || true)"
+      done <<< "$(git "${global_args[@]+"${global_args[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null || true)"
       candidates=$GIT_REMOTE
       ;;
     *)
-      candidates=$(git -C "$GIT_REPO_DIR" "${c_overrides[@]+"${c_overrides[@]}"}" remote get-url --all --push "$GIT_REMOTE" 2>/dev/null || true)
+      candidates=$(git "${global_args[@]+"${global_args[@]}"}" remote get-url --all --push "$GIT_REMOTE" 2>/dev/null || true)
       ;;
   esac
   [ -n "$candidates" ] || return 2
@@ -674,6 +735,7 @@ authorize() {
   case "$tool" in
     gh|gh-axi)
       classify_gh "$tool" "$@"
+      [ -z "$ARGUMENT_ERROR" ] || die "$ARGUMENT_ERROR"
       [ "$MUTATION" -eq 1 ] || die "authorized command is not a repository mutation"
       [ "$TARGET" = "$normalized" ] || die "authorized command must explicitly name exact repository '$normalized'"
       if [ -n "$TRANSFER_DEST" ] && repo_is_protected "$TRANSFER_DEST"; then

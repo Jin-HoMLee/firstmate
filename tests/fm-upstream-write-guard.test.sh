@@ -167,6 +167,47 @@ for tool in gh gh-axi; do
 done
 pass "API help exemptions respect option ownership and non-consuming boolean flags"
 
+for tool in gh gh-axi; do
+  for field_flag in f F; do
+    expect_refused "$tool" api /repos/kunchenguid/dotfiles/issues "-i$field_flag" title=x
+    expect_refused "$tool" api "-i$field_flag" title=x /repos/kunchenguid/dotfiles/issues
+    expect_refused "$tool" api /repos/kunchenguid/dotfiles/issues "-i${field_flag}title=x"
+    expect_allowed "$tool" api "-i$field_flag" sha=main /repos/kunchenguid/dotfiles/commits -X GET
+    expect_allowed "$tool" api -X GET /repos/kunchenguid/dotfiles/commits "-i${field_flag}=sha=main"
+    expect_allowed "$tool" api /repos/Jin-HoMLee/dotfiles/issues "-i$field_flag" title=intended
+    expect_refused "$tool" api "-i$field_flag" "$mutation" graphql
+    expect_allowed "$tool" api "-i$field_flag" "$query" graphql
+  done
+  for option in -it -it=--help -it--help -iH; do
+    case "$option" in
+      -it|-iH)
+        expect_refused "$tool" api "$option" --help graphql -f "$mutation"
+        expect_allowed "$tool" api "$option" --help graphql -f "$query"
+        ;;
+      *)
+        expect_refused "$tool" api "$option" graphql -f "$mutation"
+        expect_allowed "$tool" api "$option" graphql -f "$query"
+        ;;
+    esac
+  done
+  expect_refused "$tool" api -iX POST /repos/kunchenguid/dotfiles/issues -f title=x
+  expect_allowed "$tool" api -iXGET /repos/kunchenguid/dotfiles/commits -f sha=main
+  expect_allowed "$tool" api graphql -ih -f "$mutation"
+  expect_allowed "$tool" api graphql --help=true -f "$mutation"
+  expect_refused "$tool" api graphql --help=false -f "$mutation"
+  expect_refused "$tool" api graphql --future-option --help -f "$query"
+  expect_refused "$tool" api /repos/kunchenguid/dotfiles/issues -izf title=x
+  expect_refused "$tool" pr create -R kunchenguid/dotfiles --draft --title --help --body text
+  expect_refused "$tool" pr create -R kunchenguid/dotfiles -dt --help --body text
+  expect_refused "$tool" pr create -R kunchenguid/dotfiles --draft=false --title=--help --body text
+  expect_refused "$tool" pr create -R kunchenguid/dotfiles --future-option --help
+  expect_allowed "$tool" pr create -R kunchenguid/dotfiles --draft --help
+  expect_allowed "$tool" pr create -R kunchenguid/dotfiles -dh
+  expect_allowed "$tool" pr create -R Jin-HoMLee/dotfiles --draft --title --help --body text
+  expect_allowed "$tool" pr view 48 -R kunchenguid/dotfiles
+done
+pass "short clusters and non-API help share bounded option ownership without hiding mutations"
+
 input_body="$TMP_ROOT/graphql-input.json"
 printf '%s\n' '{"query":"mutation { addComment(input:{subjectId:\"protected-PR-node-id\",body:\"text\"}) { clientMutationId } }"}' >"$input_body"
 for tool in gh gh-axi; do
@@ -203,6 +244,26 @@ for endpoint in graphql /graphql https://api.github.com/graphql; do
   done
 done
 pass "primary shell policy shares endpoint and query-option classification"
+
+for tool in gh gh-axi; do
+  for command in \
+    "$tool api /repos/kunchenguid/dotfiles/issues -if title=x" \
+    "$tool api -iF '$mutation' graphql" \
+    "$tool api graphql -it --help -f '$mutation'" \
+    "$tool pr create -R kunchenguid/dotfiles --draft --title --help --body text"; do
+    verdict=$(node "$POLICY" --root "$ROOT" --command "$command")
+    case "$verdict" in deny*) ;; *) fail "primary policy lost option ownership: $command -> $verdict" ;; esac
+  done
+  for command in \
+    "$tool api -if sha=main /repos/kunchenguid/dotfiles/commits -X GET" \
+    "$tool api graphql -it --help -f '$query'" \
+    "$tool pr create -R kunchenguid/dotfiles --draft --help" \
+    "$tool pr create -R Jin-HoMLee/dotfiles --draft --title --help --body text"; do
+    verdict=$(node "$POLICY" --root "$ROOT" --command "$command")
+    [ "$verdict" = allow ] || fail "primary policy blocked supported help, read or fork operation: $verdict"
+  done
+done
+pass "primary policy retains option ownership for clustered API and draft PR commands"
 
 parent_shims=$SHIMS
 child_shims="$TMP_ROOT/child-shims"
@@ -454,6 +515,8 @@ fm_git_init_commit "$push_home"
 fm_git_init_commit "$protected_clone"
 git -C "$push_home" remote add origin git@github.com:Jin-HoMLee/dotfiles.git
 git -C "$protected_clone" remote add origin git@github.com:kunchenguid/dotfiles.git
+fork_url=https://github.com/Jin-HoMLee/dotfiles.git
+git -C "$protected_clone" config 'url.git@github.com:kunchenguid/dotfiles.git.pushInsteadOf' "$fork_url"
 mkdir -p "$push_stubs"
 : >"$push_log"
 cat >"$push_stubs/git" <<'SH'
@@ -502,14 +565,25 @@ for command in \
   'env -iC projects/upstream git push origin HEAD' \
   'if true; then env -C projects/upstream git -C . push origin HEAD; fi' \
   "env -C '$protected_clone' sh -c 'git -C . push origin HEAD'" \
-  "git -C '$protected_clone' push origin HEAD"; do
+  "git -C '$protected_clone' push origin HEAD" \
+  "git -C '$protected_clone' -C . push origin HEAD" \
+  "git -C'$protected_clone' -C. push origin HEAD" \
+  "git -C '$protected_clone' -C '' push origin HEAD" \
+  "git -C '$push_home' -C projects/upstream push origin HEAD" \
+  "(cd projects/upstream && git push '$fork_url' HEAD)" \
+  "env -C projects/upstream git push '$fork_url' HEAD" \
+  "git -C '$protected_clone' -C . push '$fork_url' HEAD"; do
   expect_push_policy deny "$command"
 done
 for command in \
   'git -C . push origin HEAD' \
   'env FIXTURE=1 git -C . push origin HEAD' \
   "(cd projects/upstream && git -C '$push_home' push origin HEAD)" \
-  "(cd projects/upstream && git -C'$push_home' push origin HEAD)"; do
+  "(cd projects/upstream && git -C'$push_home' push origin HEAD)" \
+  "git -C '$push_home' -C . push origin HEAD" \
+  "git -C '$protected_clone' -C '$push_home' push origin HEAD" \
+  "(cd projects/upstream && git -C '$push_home' -C . push '$fork_url' HEAD)" \
+  "git -C '$push_home' push '$fork_url' HEAD"; do
   expect_push_policy allow "$command"
 done
 for command in \
@@ -521,6 +595,24 @@ for command in \
   [ "$verdict" = allow ] || fail "primary policy blocked a read or an independently anchored fork push: $verdict"
 done
 pass "primary push policy refuses unresolved directory context while retaining reads and anchored fork pushes"
+
+for flag in -C -Cattached; do
+  case "$flag" in
+    -C) directory_args=(-C "$protected_clone" -C .) ;;
+    *) directory_args=("-C$protected_clone" -C.) ;;
+  esac
+  for destination in origin "$fork_url"; do
+    status=0
+    (cd "$push_home" && "$GUARD" check git "${directory_args[@]}" push "$destination" HEAD) \
+      >"$TMP_ROOT/sequential.out" 2>"$TMP_ROOT/sequential.err" || status=$?
+    [ "$status" -eq 2 ] || fail "shared guard resolved repeated $flag against the wrong repository"
+  done
+done
+(cd "$push_home" && "$GUARD" check git -C "$push_home" -C . push origin HEAD) \
+  || fail "shared guard rejected sequential -C in a personal fork"
+(cd "$push_home" && "$GUARD" check git -C "$protected_clone" -C "$push_home" push "$fork_url" HEAD) \
+  || fail "shared guard rejected an absolute -C reset to a personal fork"
+pass "shared push classification preserves sequential directory and URL-rewrite configuration"
 
 status=0
 "$GUARD" check git -C "$repo" -c remote.pushDefault=git@github.com:kunchenguid/dotfiles.git push \
@@ -854,6 +946,61 @@ for tool in gh gh-axi; do
   [ "$(wc -l <"$LOG" | tr -d ' ')" = "$before" ] || fail "nested worker authorization reached the forge"
 done
 pass "GraphQL option ordering retains exact audited authorization and the nested-worker authority boundary"
+
+for tool in gh gh-axi; do
+  bounded_home="$TMP_ROOT/bounded-auth-$tool"
+  for operation in api-field api-template pr-draft; do
+    case "$operation" in
+      api-field)
+        operation_args=(api /repos/kunchenguid/dotfiles/issues -if title=test)
+        operation_words='Open exactly one test issue in kunchenguid/dotfiles.'
+        ;;
+      api-template)
+        operation_args=(api graphql -R kunchenguid/dotfiles -it --help -f "$mutation")
+        operation_words='Add exactly one test comment in kunchenguid/dotfiles.'
+        ;;
+      pr-draft)
+        operation_args=(pr create -R kunchenguid/dotfiles --draft --title --help --body text)
+        operation_words='Create one draft PR titled --help with body text in kunchenguid/dotfiles.'
+        ;;
+    esac
+    printf '%s\n' "$operation_words" >"$TMP_ROOT/bounded-words.txt"
+    before=$(wc -l <"$LOG" | tr -d ' ')
+    FM_HOME="$bounded_home" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+      "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/bounded-words.txt" -- \
+      "$tool" "${operation_args[@]}" || fail "supported $operation lost exact authorization"
+    [ "$(wc -l <"$LOG" | tr -d ' ')" -eq $((before + 1)) ] || fail "authorized $operation did not execute once"
+  done
+  [ "$(find "$bounded_home/state/upstream-write-authorizations" -name '*.record' -type f | wc -l | tr -d ' ')" = 3 ] \
+    || fail "each bounded option authorization must be audited"
+  for record in "$bounded_home/state/upstream-write-authorizations/"*.record; do
+    assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "bounded option audit omitted the exact repository"
+    assert_contains "$(cat "$record")" 'result=exit-0' "bounded option audit omitted mock execution success"
+  done
+done
+
+push_auth_home="$TMP_ROOT/sequential-push-auth"
+printf '%s\n' 'Push HEAD to origin in kunchenguid/dotfiles.' >"$TMP_ROOT/push-words.txt"
+for destination in origin "$fork_url"; do
+  before=$(wc -l <"$push_log" | tr -d ' ')
+  status=0
+  (cd "$push_home" && FM_HOME="$push_auth_home" FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" PATH="$push_stubs:$PATH" \
+    "$GUARD" authorize --repo kunchenguid/not-dotfiles --captain-words-file "$TMP_ROOT/push-words.txt" -- \
+    git -C "$protected_clone" -C . push "$destination" HEAD) \
+    >"$TMP_ROOT/sequential-auth.out" 2>"$TMP_ROOT/sequential-auth.err" || status=$?
+  [ "$status" -eq 2 ] || fail "sequential directory authorization accepted the wrong protected repository"
+  [ "$(wc -l <"$push_log" | tr -d ' ')" -eq "$before" ] || fail "out-of-scope sequential push executed"
+done
+before=$(wc -l <"$push_log" | tr -d ' ')
+(cd "$push_home" && FM_HOME="$push_auth_home" FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" PATH="$push_stubs:$PATH" \
+  "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/push-words.txt" -- \
+  git -C "$protected_clone" -C . push origin HEAD) || fail "sequential -C must support exact audited git authorization"
+[ "$(wc -l <"$push_log" | tr -d ' ')" -eq $((before + 1)) ] || fail "authorized sequential push did not execute once"
+record=$(find "$push_auth_home/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
+[ -n "$record" ] || fail "sequential push authorization omitted its audit record"
+assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "sequential push audit recorded the wrong repository"
+assert_contains "$(cat "$record")" 'result=exit-0' "sequential push audit did not record mock execution"
+pass "bounded option and sequential directory operations preserve exact authorization and auditing"
 
 audit_stubs="$TMP_ROOT/audit-stubs"
 mkdir -p "$audit_stubs"
