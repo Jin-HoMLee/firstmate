@@ -28,7 +28,7 @@ Workers cannot invoke the override and must report the refusal to firstmate.
 After receiving the exact authorization, Firstmate:
 
 1. Writes the captain's exact words, without paraphrase or speaker label, to a private regular file under this home's task or decision data.
-2. Makes the GitHub command name the exact repository with `-R/--repo`, an API `/repos/<owner>/<repo>/...` path, or an unambiguous GitHub URL; for git, names a remote whose locally resolved push URL is that exact repository.
+2. Makes the GitHub command name the exact repository with `-R/--repo`, an owner-qualified `gh repo` destination, or an API `/repos/<owner>/<repo>/...` path; for git, names one explicit remote whose single locally resolved push URL is that exact repository.
 3. Runs:
 
    ```sh

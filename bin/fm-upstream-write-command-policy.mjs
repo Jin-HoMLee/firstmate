@@ -32,22 +32,34 @@ function checkTool(tool, args, root) {
   return null;
 }
 
+function checkToolWords(tool, words, root) {
+  if ((tool !== "git" || words.some((word) => word.value === "push")) &&
+      words.some((word) => !word.literal || word.unquotedExpansion || word.subs.length > 0)) {
+    return {
+      decision: "deny",
+      code: "protected-upstream-write",
+      reason: "repository writes require literal arguments and a proved destination; shell expansion is unsupported",
+    };
+  }
+  return checkTool(tool, words.map((word) => word.value), root);
+}
+
 function classifyPosition(position, root) {
   if (!position.command) return null;
   if (position.unresolvedWrapperOption) {
-    const words = position.words.slice(position.index).map((word) => word.value);
+    const words = position.words.slice(position.index);
     for (let i = 0; i < words.length; i += 1) {
-      const candidate = base(words[i] || "");
+      const candidate = base(words[i]?.value || "");
       if (!GUARD_TOOLS.has(candidate)) continue;
-      const denied = checkTool(candidate, words.slice(i + 1), root);
+      const denied = checkToolWords(candidate, words.slice(i + 1), root);
       if (denied) return denied;
     }
     return null;
   }
   const tool = base(position.command.value);
   if (!GUARD_TOOLS.has(tool)) return null;
-  const args = position.words.slice(position.index + 1).map((word) => word.value);
-  return checkTool(tool, args, root);
+  const args = position.words.slice(position.index + 1);
+  return checkToolWords(tool, args, root);
 }
 
 function decodeWord(word) {
@@ -58,14 +70,9 @@ function decodeWord(word) {
   return word.replace(/\\(.)/g, "$1").replace(/['"]/g, "");
 }
 
-function rawLexErrorMention(command, root) {
+function rawLexErrorMention(command) {
   const words = command.split(/[\s;&|<>()]+/).map(decodeWord);
-  for (let i = 0; i < words.length; i += 1) {
-    const tool = base(words[i] || "");
-    if (!GUARD_TOOLS.has(tool)) continue;
-    if (checkTool(tool, words.slice(i + 1), root)) return true;
-  }
-  return false;
+  return words.some((word) => GUARD_TOOLS.has(base(word)));
 }
 
 function gitPushInfo(position) {
@@ -129,7 +136,7 @@ function decision(command, root = defaultRoot) {
       reason: "command nesting exceeds the shell analysis limit",
     };
   }
-  if (traversalError && rawLexErrorMention(command, root)) {
+  if (traversalError && rawLexErrorMention(command)) {
     return {
       decision: "deny",
       code: "protected-upstream-write",

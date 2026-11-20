@@ -292,6 +292,40 @@ assert_contains "$(cat "$TMP_ROOT/err")" "must name its exact repository" \
   "omitted-repository refusal did not explain fork-aware default protection"
 pass "both GitHub CLIs refuse the omitted-repository PR-create path"
 
+body_url=https://github.com/Jin-HoMLee/dotfiles/issues/1
+for tool in gh gh-axi; do
+  for option in --title --body; do
+    expect_refused "$tool" pr create "$option=$body_url"
+    expect_refused "$tool" pr create "$option" "$body_url"
+    expect_allowed "$tool" pr create -R Jin-HoMLee/dotfiles "$option=$body_url"
+    expect_refused "$tool" pr create -R kunchenguid/dotfiles "$option=$body_url"
+    for command in \
+      "$tool pr create --title=Fix $option=$body_url" \
+      "$tool pr create -R '' $option=$body_url" \
+      "$tool pr create --unproved-option $body_url"; do
+      verdict=$(node "$POLICY" --root "$ROOT" --command "$command")
+      case "$verdict" in deny*) ;; *) fail "primary policy used option data as a repository: $verdict" ;; esac
+    done
+  done
+  expect_refused "$tool" pr create --title=Fix --body="$body_url"
+  expect_refused "$tool" pr create -R '' --body="$body_url"
+  expect_refused "$tool" pr create -R Jin-HoMLee/dotfiles --unproved-option "$body_url"
+  expect_allowed "$tool" pr create --help
+  expect_allowed "$tool" pr view 48 -R kunchenguid/dotfiles --template "$body_url"
+  verdict=$(node "$POLICY" --root "$ROOT" --command "$tool pr create -R Jin-HoMLee/dotfiles --title=Fix --body=$body_url")
+  [ "$verdict" = allow ] || fail "primary policy blocked a proved fork destination with URL-valued content"
+done
+pass "only owned explicit selectors establish mutation targets, never attached title or body data"
+
+for command in \
+  'REPO=kunchenguid/dotfiles; gh pr create -R "$REPO" --title=Fix' \
+  'Q=mutation; gh api graphql -f "query=$Q"' \
+  'REPO=Jin-HoMLee/dotfiles; gh pr create -R "$REPO" --title=Fix'; do
+  verdict=$(node "$POLICY" --root "$ROOT" --command "$command")
+  case "$verdict" in deny*) ;; *) fail "unproved GitHub arguments received a read/write exemption: $verdict" ;; esac
+done
+pass "primary GitHub argument expansion does not establish a destination or verified query"
+
 expect_refused gh-axi pr create -R kunchenguid/dotfiles --title accidental
 expect_refused gh pr close 48 --repo=kunchenguid/dotfiles
 expect_refused gh-axi api PATCH /repos/kunchenguid/dotfiles/pulls/48 --field state=closed
@@ -305,14 +339,14 @@ expect_allowed gh secret set -v private NAME -R Jin-HoMLee/dotfiles
 expect_allowed gh variable set -v selected NAME -R Jin-HoMLee/dotfiles
 pass "gh secret/variable set parse -v as --visibility, not a help/version early-return"
 
-expect_allowed gh repo create myrepo
+expect_refused gh repo create myrepo
 expect_allowed gh repo create myorg/myrepo
 expect_refused gh repo create kunchenguid/newrepo
 expect_refused gh repo create KUNCHENGUID/newrepo
-expect_allowed gh repo create myrepo --source kunchenguid/dotfiles
-expect_allowed gh repo create myrepo --template kunchenguid/dotfiles
-expect_allowed gh repo create myrepo --source=kunchenguid/dotfiles
-expect_allowed gh repo create myrepo -s kunchenguid/dotfiles
+expect_allowed gh repo create Jin-HoMLee/myrepo --source kunchenguid/dotfiles
+expect_allowed gh repo create Jin-HoMLee/myrepo --template kunchenguid/dotfiles
+expect_allowed gh repo create Jin-HoMLee/myrepo --source=kunchenguid/dotfiles
+expect_allowed gh repo create Jin-HoMLee/myrepo -s kunchenguid/dotfiles
 expect_allowed gh repo create myorg/myrepo --source kunchenguid/dotfiles
 expect_refused gh repo create kunchenguid/newrepo --source Jin-HoMLee/dotfiles
 pass "gh repo create keeps protected --source/--template inputs distinct from its destination"
@@ -324,7 +358,7 @@ pass "gh repo unarchive mirrors archive: non-protected destinations are allowed"
 expect_refused gh repo create kunchenguid/newrepo -h https://example.com
 expect_refused gh repo create -h https://example.com kunchenguid/newrepo
 expect_refused gh repo edit kunchenguid/dotfiles -h https://example.com
-expect_allowed gh repo create myrepo -h https://example.com
+expect_allowed gh repo create Jin-HoMLee/myrepo -h https://example.com
 expect_allowed gh repo create --help
 expect_allowed gh repo edit --help
 pass "gh repo create/edit parse -h as --homepage, not help, while --help stays allowed"
@@ -333,8 +367,8 @@ expect_refused gh repo edit -h https://github.com/someuser/somerepo kunchenguid/
 expect_refused gh repo edit --homepage https://github.com/someuser/somerepo kunchenguid/dotfiles
 expect_refused gh repo edit --default-branch feature/x kunchenguid/dotfiles
 expect_refused gh repo edit -h https://github.com/someuser/somerepo
-expect_allowed gh repo create myrepo --source https://github.com/kunchenguid/dotfiles
-expect_allowed gh repo create myrepo --template https://github.com/kunchenguid/dotfiles
+expect_allowed gh repo create Jin-HoMLee/myrepo --source https://github.com/kunchenguid/dotfiles
+expect_allowed gh repo create Jin-HoMLee/myrepo --template https://github.com/kunchenguid/dotfiles
 pass "gh repo edit skips homepage/branch flag values when locating its destination"
 
 expect_allowed gh repo edit --template myorg/myrepo
@@ -379,14 +413,14 @@ expect_refused gh issue transfer 123 myorg/myrepo -R kunchenguid/dotfiles
 expect_allowed gh issue transfer 123 myorg/myrepo -R otherorg/otherrepo
 pass "gh issue transfer blocks a protected destination and protected source"
 
-policy_repo_own=$(node "$POLICY" --root "$ROOT" --command 'gh repo create myrepo')
+policy_repo_own=$(node "$POLICY" --root "$ROOT" --command 'gh repo create Jin-HoMLee/myrepo')
 [ "$policy_repo_own" = allow ] || fail "primary shell policy blocked own-account repo creation: $policy_repo_own"
 policy_repo_protected=$(node "$POLICY" --root "$ROOT" --command 'gh repo create kunchenguid/newrepo')
 case "$policy_repo_protected" in
   deny*) ;;
   *) fail "primary shell policy allowed a protected repo creation: $policy_repo_protected" ;;
 esac
-policy_create_source=$(node "$POLICY" --root "$ROOT" --command 'gh repo create myrepo --source kunchenguid/dotfiles')
+policy_create_source=$(node "$POLICY" --root "$ROOT" --command 'gh repo create Jin-HoMLee/myrepo --source kunchenguid/dotfiles')
 [ "$policy_create_source" = allow ] || fail "primary shell policy blocked own-account creation from a protected source: $policy_create_source"
 policy_fork=$(node "$POLICY" --root "$ROOT" --command 'gh repo fork kunchenguid/dotfiles')
 [ "$policy_fork" = allow ] || fail "primary shell policy blocked a protected-source fork: $policy_fork"
@@ -614,6 +648,76 @@ done
   || fail "shared guard rejected an absolute -C reset to a personal fork"
 pass "shared push classification preserves sequential directory and URL-rewrite configuration"
 
+expect_shared_push_refused() {
+  local status=0
+  "$GUARD" check git "$@" >"$TMP_ROOT/single-target.out" 2>"$TMP_ROOT/single-target.err" || status=$?
+  [ "$status" -eq 2 ] || fail "shared guard accepted an unproved or multiple push destination: $*"
+}
+
+rewrite_repos=()
+for rewrite in insteadOf pushInsteadOf; do
+  rewrite_repo="$TMP_ROOT/rewrite-$rewrite"
+  rewrite_repos+=("$rewrite_repo")
+  fm_git_init_commit "$rewrite_repo"
+  git -C "$rewrite_repo" remote add origin "$fork_url"
+  git -C "$rewrite_repo" config "url.git@github.com:kunchenguid.$rewrite" https://github.com/Jin-HoMLee
+  expect_shared_push_refused -C "$rewrite_repo" push "$fork_url" HEAD
+  expect_shared_push_refused -C "$rewrite_repo" push origin HEAD
+  expect_push_policy deny "git -C '$rewrite_repo' push '$fork_url' HEAD"
+  expect_push_policy deny "git -C '$rewrite_repo' push origin HEAD"
+  safe_rewrite_repo="$TMP_ROOT/safe-rewrite-$rewrite"
+  fm_git_init_commit "$safe_rewrite_repo"
+  git -C "$safe_rewrite_repo" remote add origin https://github.com/rewrite-source/dotfiles.git
+  git -C "$safe_rewrite_repo" config "url.git@github.com:Jin-HoMLee.$rewrite" https://github.com/rewrite-source
+  expect_shared_push_refused -C "$safe_rewrite_repo" push https://github.com/rewrite-source/dotfiles.git HEAD
+  expect_push_policy allow "git -C '$safe_rewrite_repo' push origin HEAD"
+done
+pass "direct URL rewrites are unsupported while named remotes use Git's complete effective destination"
+
+multi_repos=()
+for destinations in protected mixed personal duplicate; do
+  multi_repo="$TMP_ROOT/multi-$destinations"
+  multi_repos+=("$multi_repo")
+  fm_git_init_commit "$multi_repo"
+  git -C "$multi_repo" remote add origin "$fork_url"
+  case "$destinations" in
+    protected) first=git@github.com:kunchenguid/firstmate.git; second=git@github.com:kunchenguid/dotfiles.git ;;
+    mixed) first=$fork_url; second=git@github.com:kunchenguid/dotfiles.git ;;
+    personal) first=$fork_url; second=git@github.com:Jin-HoMLee/firstmate.git ;;
+    duplicate) first=$fork_url; second=$fork_url ;;
+  esac
+  git -C "$multi_repo" config --add remote.origin.pushurl "$first"
+  git -C "$multi_repo" config --add remote.origin.pushurl "$second"
+  expect_shared_push_refused -C "$multi_repo" push origin HEAD
+  expect_push_policy deny "git -C '$multi_repo' push origin HEAD"
+done
+pass "complete multi-push destination sets are refused, regardless of ordering or ownership"
+
+for command in \
+  'OWNER=kunchenguid; git push "https://github.com/${OWNER}/dotfiles.git" HEAD' \
+  'REMOTE=origin; git push "$REMOTE" HEAD' \
+  'git push "$(printf origin)" HEAD' \
+  'git push https://github.com/{Jin-HoMLee,kunchenguid}/dotfiles.git HEAD' \
+  "REPO='$push_home'; git -C \"\$REPO\" push origin HEAD" \
+  'nice -10 git push "https://github.com/${OWNER}/dotfiles.git" HEAD'; do
+  expect_push_policy deny "$command"
+done
+expect_shared_push_refused -C "$push_home" push 'https://github.com/${OWNER}/dotfiles.git' HEAD
+expect_shared_push_refused -C "$push_home" push '' HEAD
+expect_shared_push_refused -C "$push_home" push --repo=origin --repo=origin HEAD
+expect_shared_push_refused -C "$push_home" push origin --repo=origin HEAD
+expect_shared_push_refused -C "$protected_clone" push origin -o --help HEAD
+expect_shared_push_refused -C "$protected_clone" push --unproved-option --help origin HEAD
+for command in \
+  'OWNER=kunchenguid; git ls-remote "https://github.com/${OWNER}/dotfiles.git"' \
+  'git push --help' \
+  'git status --help'; do
+  verdict=$(cd "$push_home" && node "$POLICY" --root "$ROOT" --command "$command")
+  [ "$verdict" = allow ] || fail "literal-destination restriction blocked a safe read or genuine help: $verdict"
+done
+expect_push_policy allow "git push \"$fork_url\" HEAD"
+pass "primary pushes require literal arguments and explicit proved destinations without evaluating expansions"
+
 status=0
 "$GUARD" check git -C "$repo" -c remote.pushDefault=git@github.com:kunchenguid/dotfiles.git push \
   >"$TMP_ROOT/gitc1.out" 2>"$TMP_ROOT/gitc1.err" || status=$?
@@ -638,13 +742,16 @@ status=0
 "$GUARD" check git -C "$repo" -c remote.origin.pushurl= -c remote.origin.url=git@github.com:kunchenguid/dotfiles.git push origin \
   >"$TMP_ROOT/gitc6.out" 2>"$TMP_ROOT/gitc6.err" || status=$?
 [ "$status" -eq 2 ] || fail "git -c empty pushurl with a protected url override should be refused, got $status"
-"$GUARD" check git -C "$repo" -c remote.pushDefault=origin push \
-  || fail "git -c remote.pushDefault override to a local remote should be allowed"
-"$GUARD" check git -C "$repo" -c branch.main.pushRemote=origin push \
-  || fail "git -c branch.<name>.pushRemote override to a local remote should be allowed"
+"$GUARD" check git -C "$repo" -c remote.pushDefault=origin push origin \
+  || fail "git -c remote.pushDefault with an explicit local remote should be allowed"
+"$GUARD" check git -C "$repo" -c branch.main.pushRemote=origin push origin \
+  || fail "git -c branch.<name>.pushRemote with an explicit local remote should be allowed"
+status=0
+"$GUARD" check git -C "$repo" push >"$TMP_ROOT/default.out" 2>"$TMP_ROOT/default.err" || status=$?
+[ "$status" -eq 2 ] || fail "git push without an explicit destination must refuse defaults"
 "$GUARD" check git -C "$repo" push origin \
   || fail "git push to a local remote without -c should be allowed"
-pass "git -c config overrides are honored when resolving the push destination"
+pass "git -c config overrides are honored for explicit destinations and defaults are refused"
 
 for flag in "--git-dir=$repo/.git" "--work-tree=$repo" "--namespace=test"; do
   status=0
@@ -674,9 +781,11 @@ status=0
 MYURL=git@github.com:kunchenguid/dotfiles.git "$GUARD" check git -C "$repo" --config-env remote.origin.pushUrl=MYURL push origin main:main \
   >"$TMP_ROOT/gitce4.out" 2>"$TMP_ROOT/gitce4.err" || status=$?
 [ "$status" -eq 2 ] || fail "git --config-env two-arg mixed-case destination key should be refused, got $status"
+status=0
 MYNAME='test' "$GUARD" check git -C "$repo" --config-env=user.name=MYNAME push origin main:main \
-  || fail "git --config-env for a non-destination key should be allowed"
-pass "git --config-env push-destination overrides are refused when unresolvable"
+  >"$TMP_ROOT/gitce5.out" 2>"$TMP_ROOT/gitce5.err" || status=$?
+[ "$status" -eq 2 ] || fail "variable-derived --config-env options are unsupported even for a harmless key"
+pass "git --config-env options are refused without evaluating variable-derived configuration"
 
 status=0
 "$GUARD" check git -C "$repo" -c 'url.git@github.com:kunchenguid/dotfiles.git.insteadOf=git@github.com:someuser/somerepo.git' push someuser main:main \
@@ -702,8 +811,10 @@ status=0
   || fail "git push to a direct non-protected URL without insteadOf should be allowed"
 "$GUARD" check git -C "$repo" -c 'url.git@github.com:.insteadOf=https://github.com/' push git@github.com:someuser/somerepo.git main:main \
   || fail "git direct non-protected URL with a non-matching insteadOf rule should be allowed"
+status=0
 "$GUARD" check git -C "$repo" -c 'url.git@github.com:.insteadOf=https://github.com/' push https://github.com/someuser/somerepo.git main:main \
-  || fail "git direct non-protected URL with a non-protected insteadOf base should be allowed"
+  >"$TMP_ROOT/safe-rewrite.out" 2>"$TMP_ROOT/safe-rewrite.err" || status=$?
+[ "$status" -eq 2 ] || fail "rewrite-dependent direct URLs must be refused even when the replacement is unprotected"
 pass "git direct-URL insteadOf/pushInsteadOf redirects are detected"
 
 for ssh_url in \
@@ -1001,6 +1112,62 @@ record=$(find "$push_auth_home/state/upstream-write-authorizations" -name '*.rec
 assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "sequential push audit recorded the wrong repository"
 assert_contains "$(cat "$record")" 'result=exit-0' "sequential push audit did not record mock execution"
 pass "bounded option and sequential directory operations preserve exact authorization and auditing"
+
+expect_unsupported_authorization() {
+  local home=$1 grant=$2 status=0 forge_before push_before
+  shift 2
+  forge_before=$(wc -l <"$LOG" | tr -d ' ')
+  push_before=$(wc -l <"$push_log" | tr -d ' ')
+  FM_HOME="$home" FM_TEST_FORGE_LOG="$LOG" FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" \
+    PATH="$push_stubs:$STUBS:$PATH" \
+    "$GUARD" authorize --repo "$grant" --captain-words-file "$words" -- "$@" \
+    >"$TMP_ROOT/unsupported-auth.out" 2>"$TMP_ROOT/unsupported-auth.err" || status=$?
+  [ "$status" -eq 2 ] || fail "an unsupported destination was authorized: $*"
+  [ "$(wc -l <"$LOG" | tr -d ' ')" -eq "$forge_before" ] || fail "unsupported authorization reached the forge"
+  [ "$(wc -l <"$push_log" | tr -d ' ')" -eq "$push_before" ] || fail "unsupported authorization executed a push"
+  [ ! -d "$home/state/upstream-write-authorizations" ] || fail "unsupported authorization created an operation grant record"
+}
+for tool in gh gh-axi; do
+  expect_unsupported_authorization "$TMP_ROOT/body-auth-missing-$tool" kunchenguid/dotfiles \
+    "$tool" pr create --title=Fix --body="$body_url"
+  expect_unsupported_authorization "$TMP_ROOT/body-auth-mismatch-$tool" kunchenguid/firstmate \
+    "$tool" pr create -R kunchenguid/dotfiles --title=Fix --body="$body_url"
+  body_home="$TMP_ROOT/body-auth-supported-$tool"
+  printf '%s\n' 'Create one PR titled Fix in kunchenguid/dotfiles with the supplied body.' >"$TMP_ROOT/body-words.txt"
+  before=$(wc -l <"$LOG" | tr -d ' ')
+  FM_HOME="$body_home" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:$PATH" \
+    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/body-words.txt" -- \
+    "$tool" pr create -R kunchenguid/dotfiles --title=Fix --body="$body_url" \
+    || fail "owned body data must not override an exact supported grant"
+  [ "$(wc -l <"$LOG" | tr -d ' ')" -eq $((before + 1)) ] || fail "explicit body-valued authorization did not execute once"
+  record=$(find "$body_home/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
+  [ -n "$record" ] || fail "explicit body-valued authorization omitted its audit record"
+  assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "body-valued authorization recorded content as its target"
+  assert_contains "$(cat "$record")" 'result=exit-0' "body-valued authorization omitted execution success"
+done
+for rewrite_repo in "${rewrite_repos[@]}"; do
+  expect_unsupported_authorization "$rewrite_repo/direct-auth" kunchenguid/dotfiles \
+    git -C "$rewrite_repo" push "$fork_url" HEAD
+  expect_unsupported_authorization "$rewrite_repo/mismatched-auth" kunchenguid/firstmate \
+    git -C "$rewrite_repo" push origin HEAD
+  before=$(wc -l <"$push_log" | tr -d ' ')
+  FM_HOME="$rewrite_repo/named-auth" FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" PATH="$push_stubs:$PATH" \
+    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/push-words.txt" -- \
+    git -C "$rewrite_repo" push origin HEAD || fail "Git-resolved single named destination lost exact authorization"
+  [ "$(wc -l <"$push_log" | tr -d ' ')" -eq $((before + 1)) ] || fail "named rewritten authorization did not execute once"
+  record=$(find "$rewrite_repo/named-auth/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
+  [ -n "$record" ] || fail "named rewritten authorization omitted its audit record"
+  assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "named rewrite audit omitted its complete destination"
+  assert_contains "$(cat "$record")" 'result=exit-0' "named rewrite audit omitted execution success"
+done
+for multi_repo in "${multi_repos[@]}"; do
+  for grant in kunchenguid/firstmate kunchenguid/dotfiles; do
+    expect_unsupported_authorization "$multi_repo/auth-${grant##*/}" "$grant" git -C "$multi_repo" push origin HEAD
+  done
+done
+expect_unsupported_authorization "$TMP_ROOT/variable-url-auth" kunchenguid/dotfiles \
+  git -C "$push_home" push 'https://github.com/${OWNER}/dotfiles.git' HEAD
+pass "unsupported targets cannot execute under absent, mismatched or single-repository grants"
 
 audit_stubs="$TMP_ROOT/audit-stubs"
 mkdir -p "$audit_stubs"

@@ -21,8 +21,8 @@
 #     destination is that same repo. It writes an audit record before executing.
 #
 # The classifier never contacts GitHub. For gh and gh-axi, every repository
-# mutation must name its repository with -R/--repo, a GitHub URL, or an API
-# /repos/<owner>/<repo>/ path. This deliberately refuses mutation commands that
+# mutation must name its repository with -R/--repo, a repo positional argument,
+# or an API /repos/<owner>/<repo>/ path. This deliberately refuses mutation commands that
 # rely on fork-aware default resolution: gh may select a fork's parent even
 # when origin is the personal fork. Read-only commands stay available with or
 # without a selector. gh api graphql mutations are refused even when named,
@@ -105,35 +105,12 @@ fork_org() {
 }
 
 repo_destination() {
-  local sub=$1 arg expect_flag_value=0
+  local arg expect_repo=0
   shift
   for arg in "$@"; do
-    if [ "$expect_flag_value" -eq 1 ]; then
-      expect_flag_value=0
-      continue
-    fi
-    case "$sub" in
-      create|view)
-        case "$arg" in
-          -t|--template) expect_flag_value=1; continue ;;
-          --template=*|-t?*) continue ;;
-        esac
-        ;;
-    esac
+    if [ "$expect_repo" -eq 1 ]; then expect_repo=0; continue; fi
     case "$arg" in
-      -b|--branch|-q|--jq|-d|--description|-h|--homepage|-s|--source|-R|--repo|-g|--gitignore|-l|--license|-r|--remote|-p|--team|--json|--fork-name|--org|--remote-name|--default-branch|--add-topic|--remove-topic|--squash-merge-commit-message|--visibility)
-        expect_flag_value=1
-        continue
-        ;;
-      --branch=*|--jq=*|--description=*|--homepage=*|--source=*|--repo=*|--gitignore=*|--license=*|--remote=*|--team=*|--json=*|--fork-name=*|--org=*|--remote-name=*|--default-branch=*|--add-topic=*|--remove-topic=*|--squash-merge-commit-message=*|--visibility=*)
-        continue
-        ;;
-      -b?*|-q?*|-d?*|-h?*|-s?*|-R?*|-g?*|-l?*|-r?*|-p?*)
-        continue
-        ;;
-    esac
-    case "$arg" in
-      -*) continue ;;
+      -R|--repo) expect_repo=1 ;;
       */*) set_target "$arg" repo-positional; break ;;
     esac
   done
@@ -175,7 +152,7 @@ TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD='' MUTATION=0 REPO_SCOPED=0
 set_target() {
   local candidate normalized
   candidate=$1
-  normalized=$(normalize_repo "$candidate" 2>/dev/null) || return 0
+  normalized=$(normalize_repo "$candidate" 2>/dev/null) || { TARGET_UNPROVED=1; return 0; }
   if [ -n "$TARGET" ] && [ "$(lower "$TARGET")" != "$(lower "$normalized")" ]; then
     TARGET=AMBIGUOUS
     return 0
@@ -209,21 +186,28 @@ gh_option_kind() {
       GH_OPTION_KIND=value ;;
     repo/create/-t|repo/create/--template|repo/view/-t|repo/view/--template) GH_OPTION_KIND=value ;;
     repo/edit/--template) GH_OPTION_KIND=boolean ;;
+    issue/create/--title|issue/create/-t|issue/create/--body|issue/create/-b|secret/set/-v|secret/set/--visibility|variable/set/-v|variable/set/--visibility) GH_OPTION_KIND=value ;;
   esac
+  if [ "$top" = repo ]; then
+    case "$option" in
+      -b|--branch|-q|--jq|-d|--description|--homepage|-s|--source|-g|--gitignore|-l|--license|-r|--remote|-p|--team|--json|--fork-name|--org|--remote-name|--default-branch|--add-topic|--remove-topic|--squash-merge-commit-message|--visibility) GH_OPTION_KIND=value ;;
+    esac
+  fi
 }
 
 normalize_gh_arguments() {
   local top='' sub='' arg option value tail kind attached options=1
-  GH_ARGS=() GH_HELP=0 GH_OPTIONS_KNOWN=1
+  GH_ARGS=() GH_DESTINATION_ARGS=() GH_HELP=0 GH_OPTIONS_KNOWN=1
   while [ "$#" -gt 0 ]; do
     arg=$1
     shift
-    if [ "$options" -eq 0 ]; then GH_ARGS+=("$arg"); continue; fi
+    if [ "$options" -eq 0 ]; then GH_ARGS+=("$arg"); GH_DESTINATION_ARGS+=("$arg"); continue; fi
     case "$arg" in
-      --) options=0; GH_ARGS+=("$arg"); continue ;;
+      --) options=0; GH_OPTIONS_KNOWN=0; GH_ARGS+=("$arg"); continue ;;
       -?*) ;;
       *)
         GH_ARGS+=("$arg")
+        GH_DESTINATION_ARGS+=("$arg")
         if [ -z "$top" ]; then top=$arg; elif [ -z "$sub" ]; then sub=$arg; fi
         continue
         ;;
@@ -254,6 +238,7 @@ normalize_gh_arguments() {
             shift
           fi
           GH_ARGS+=("$option" "$value")
+          if [ "$kind" = repo ]; then GH_DESTINATION_ARGS+=("$option" "$value"); fi
           ;;
         boolean|help)
           case "$tail" in =*) value=${tail#=}; attached=1; tail='' ;; esac
@@ -276,33 +261,18 @@ normalize_gh_arguments() {
 }
 
 parse_top_sub_and_target() {
-  local tool=$1 arg expect_repo=0 expect_api_value=0 seen_top=0 seen_sub=0 previous=
+  local tool=$1 arg expect_repo=0 seen_top=0 seen_sub=0 previous=
   shift
-  TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD=''
-  for arg in "$@"; do
-    if [ "$expect_api_value" -eq 1 ]; then
-      expect_api_value=0
-      continue
-    fi
+  TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD='' TARGET_UNPROVED=0
+  for arg in "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}"; do
     if [ "$expect_repo" -eq 1 ]; then
       set_target "$arg" explicit-repository
       expect_repo=0
       previous=$arg
       continue
     fi
-    if [ "$TOP" = api ]; then
-      gh_option_kind "$TOP" "$SUB" "$arg"
-      case "$GH_OPTION_KIND" in
-        method|field|input|value) expect_api_value=1; continue ;;
-      esac
-    fi
     case "$arg" in
       -R|--repo) expect_repo=1; previous=$arg; continue ;;
-      --repo=*) set_target "${arg#--repo=}" explicit-repository ;;
-      -R?*) set_target "${arg#-R}" explicit-repository ;;
-      https://github.com/*|http://github.com/*|git@github.com:*|github.com/*)
-        [ "$TOP" = repo ] || set_target "$arg" github-url
-        ;;
     esac
     if [ "$seen_top" -eq 0 ]; then
       case "$arg" in -*) previous=$arg; continue ;; esac
@@ -333,12 +303,12 @@ parse_top_sub_and_target() {
 
   if [ "$TOP" = repo ]; then
     case "$SUB" in
-      view|fork|edit|archive|unarchive|delete|rename|sync|create) repo_destination "$SUB" "$@" ;;
+      view|fork|edit|archive|unarchive|delete|rename|sync|create) repo_destination "$SUB" "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}" ;;
     esac
   fi
 
   if [ "$TOP" = issue ] && [ "$SUB" = transfer ]; then
-    TRANSFER_DEST=$(issue_transfer_destination "$@") || TRANSFER_DEST=''
+    TRANSFER_DEST=$(issue_transfer_destination "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}") || TRANSFER_DEST=''
   fi
   : "$tool" "$previous"
 }
@@ -465,11 +435,11 @@ classify_gh() {
       case "$SUB" in
         list|view|clone|read-dir|read-file|gitignore|license|set-default|'') ;;
         deploy-key)
-          subsub=$(repo_subsubcommand "$@") || subsub=''
+          subsub=$(repo_subsubcommand "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}") || subsub=''
           case "$subsub" in list) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
           ;;
         autolink)
-          subsub=$(repo_subsubcommand "$@") || subsub=''
+          subsub=$(repo_subsubcommand "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}") || subsub=''
           case "$subsub" in list|view) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
           ;;
         fork)
@@ -479,7 +449,7 @@ classify_gh() {
             TARGET=$PROTECTED_OWNER/fork
           fi
           ;;
-        create) MUTATION=1; [ -n "$TARGET" ] && REPO_SCOPED=1 ;;
+        create) MUTATION=1; REPO_SCOPED=1 ;;
         *) MUTATION=1; REPO_SCOPED=1 ;;
       esac
       ;;
@@ -500,6 +470,9 @@ classify_gh() {
       # An explicit protected selector is still refused below if they do.
       ;;
   esac
+  if [ "$MUTATION" -eq 1 ] && { [ "$GH_OPTIONS_KNOWN" -eq 0 ] || [ "$TARGET_UNPROVED" -eq 1 ]; }; then
+    ARGUMENT_ERROR='repository mutation has unsupported options or an unproved destination; use supported options and an explicit repository'
+  fi
 }
 
 refuse_reason() {
@@ -535,15 +508,8 @@ check_gh() {
 }
 
 GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
-config_env_names_destination() {
-  case "$(lower "${1%%=*}")" in
-    remote.pushdefault|branch.*.remote|branch.*.pushremote|remote.*.url|remote.*.pushurl|url.*.insteadof|url.*.pushinsteadof) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 parse_git_push() {
-  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 expect_config_env=0 config_env_dest=0 fail_closed=0 candidates url target rule key prefix base
+  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 fail_closed=0 candidates rule prefix rules rule_status
   local -a global_args=()
   GIT_REMOTE=
   GIT_REMOTE_URL=
@@ -555,83 +521,67 @@ parse_git_push() {
       expect_c_override=0
       continue
     fi
-    if [ "$expect_config_env" -eq 1 ]; then
-      config_env_names_destination "$arg" && config_env_dest=1
-      expect_config_env=0
-      continue
-    fi
     if [ "$after_push" -eq 0 ]; then
       case "$arg" in
         -C) expect_c=1 ;;
         -C?*) global_args+=( -C "${arg#-C}" ) ;;
         -c) expect_c_override=1 ;;
-        --config-env) expect_config_env=1 ;;
-        --config-env=*) config_env_names_destination "${arg#--config-env=}" && config_env_dest=1 ;;
-        --git-dir|--work-tree|--namespace) fail_closed=1 ;;
-        --git-dir=*|--work-tree=*|--namespace=*) fail_closed=1 ;;
+        --help|-h) [ "$fail_closed" -eq 0 ] || return 3; return 1 ;;
         push) after_push=1 ;;
+        -*) fail_closed=1 ;;
+        *) [ "$fail_closed" -eq 0 ] && return 1 ;;
       esac
       continue
     fi
     if [ "$expect_repo" -eq 1 ]; then
+      [ -z "$GIT_REMOTE" ] && [ -n "$arg" ] || fail_closed=1
       GIT_REMOTE=$arg
       expect_repo=0
-      break
+      continue
     fi
     case "$arg" in
-      --repo=*) GIT_REMOTE=${arg#--repo=}; break ;;
+      --repo=*)
+        [ -z "$GIT_REMOTE" ] && [ -n "${arg#--repo=}" ] || fail_closed=1
+        GIT_REMOTE=${arg#--repo=}
+        ;;
       --repo) expect_repo=1 ;;
-      -*) ;;
-      *) GIT_REMOTE=$arg; break ;;
+      --help|-h) [ "$fail_closed" -eq 0 ] || return 3; return 1 ;;
+      --force|--force-with-lease|--force-with-lease=*|--dry-run|--tags|--all|--delete|-d|--porcelain|-u|--set-upstream|--no-verify|-f) ;;
+      -*) fail_closed=1 ;;
+      *) [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$arg ;;
     esac
   done
   [ "$after_push" -eq 1 ] || return 1
-  [ "$expect_c" -eq 0 ] && [ "$expect_c_override" -eq 0 ] || return 3
-  [ "$config_env_dest" -eq 0 ] || return 3
+  [ "$expect_c" -eq 0 ] && [ "$expect_c_override" -eq 0 ] && [ "$expect_repo" -eq 0 ] || return 3
   [ "$fail_closed" -eq 0 ] || return 3
-  if [ -z "$GIT_REMOTE" ]; then
-    GIT_REMOTE=$(git "${global_args[@]+"${global_args[@]}"}" config --get branch."$(git "${global_args[@]+"${global_args[@]}"}" branch --show-current 2>/dev/null)".pushRemote 2>/dev/null || true)
-    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git "${global_args[@]+"${global_args[@]}"}" config --get remote.pushDefault 2>/dev/null || true)
-    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$(git "${global_args[@]+"${global_args[@]}"}" config --get branch."$(git "${global_args[@]+"${global_args[@]}"}" branch --show-current 2>/dev/null)".remote 2>/dev/null || true)
-    [ -n "$GIT_REMOTE" ] || GIT_REMOTE=origin
-  fi
+  [ -n "$GIT_REMOTE" ] || return 2
   case "$GIT_REMOTE" in
-    *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*)
+    *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*|/*)
+      rules=$(git "${global_args[@]+"${global_args[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null)
+      rule_status=$?
+      [ "$rule_status" -le 1 ] || return 3
       while IFS= read -r rule; do
         [ -n "$rule" ] || continue
-        key=${rule%% *}
         prefix=${rule#* }
-        base=${key#url.}
-        base=${base%.pushInsteadOf}
-        base=${base%.insteadOf}
-        case "$GIT_REMOTE" in
-          "$prefix"*)
-            if repo_is_protected "$base"; then
-              return 3
-            fi
-            ;;
-        esac
-      done <<< "$(git "${global_args[@]+"${global_args[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null || true)"
+        case "$GIT_REMOTE" in "$prefix"*) return 3 ;; esac
+      done <<< "$rules"
       candidates=$GIT_REMOTE
       ;;
     *)
-      candidates=$(git "${global_args[@]+"${global_args[@]}"}" remote get-url --all --push "$GIT_REMOTE" 2>/dev/null || true)
+      candidates=$(git "${global_args[@]+"${global_args[@]}"}" remote get-url --all --push "$GIT_REMOTE" 2>/dev/null) || return 2
       ;;
   esac
   [ -n "$candidates" ] || return 2
-  GIT_REMOTE_URL=
-  GIT_TARGET=
-  while IFS= read -r url; do
-    [ -n "$url" ] || continue
-    [ -n "$GIT_REMOTE_URL" ] || GIT_REMOTE_URL=$url
-    target=$(normalize_repo "$url" 2>/dev/null || true)
-    [ -n "$target" ] || continue
-    [ -n "$GIT_TARGET" ] || GIT_TARGET=$target
-    if repo_is_protected "$target"; then
-      GIT_TARGET=$target
-      break
-    fi
-  done <<< "$candidates"
+  case "$candidates" in
+    *$'\n'*) return 3 ;;
+    *'$'*|*'`'*|*'*'*|*'?'*|*'['*|*']'*|*'{'*|*'}'*) return 2 ;;
+  esac
+  GIT_REMOTE_URL=$candidates
+  case "$candidates" in
+    /*) GIT_TARGET=local:$candidates ;;
+    *) GIT_TARGET=$(normalize_repo "$candidates" 2>/dev/null) || return 2 ;;
+  esac
+  [ -n "$GIT_TARGET" ] || return 2
   return 0
 }
 
