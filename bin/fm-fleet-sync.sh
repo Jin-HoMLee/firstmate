@@ -19,7 +19,10 @@
 # walks up, so a plain nested directory would otherwise resolve to the enclosing
 # repository (the firstmate checkout) and be synced under that directory's label.
 # Anything else is reported as "skipped: not a clone root" naming the repository
-# that would have been touched.
+# that would have been touched. An explicit path to this home's own source is
+# also refused when local shared-code bindings are recorded/requested: fm-update
+# owns that source's reference/lifecycle checks and consumer refresh. This project
+# path never substitutes for that owner, even for a content-only advance.
 # Pruning never deletes the checked-out branch or a branch that still has a
 # worktree, so it cannot discard unlanded work; set FM_FLEET_PRUNE=0 to disable it.
 # When the fetch fails on an orphaned .git/packed-refs.lock (left by a ref rewrite
@@ -327,6 +330,27 @@ sync_project() {
   if [ -z "$proj_abs" ] || ! [ "$proj_top" -ef "$proj_abs" ]; then
     echo "$label: skipped: not a clone root (git would act on $proj_top)"
     return 0
+  fi
+  if [ "$proj_abs" -ef "$FM_ROOT" ]; then
+    if { [ -e "$FM_HOME/${SUB_HOME_MARKER:-.fm-secondmate-home}" ] \
+      || [ -L "$FM_HOME/${SUB_HOME_MARKER:-.fm-secondmate-home}" ]; } \
+      && ! [ "$FM_HOME" -ef "$FM_ROOT" ]; then
+      echo "$label: skipped: shared-code source update belongs to the owning primary; project refresh changed nothing"
+      return 0
+    fi
+    local source_route=0
+    # Isolate the self-sync library's helper names from this project's helpers.
+    (
+      # shellcheck source=bin/fm-ff-lib.sh
+      . "$SCRIPT_DIR/fm-ff-lib.sh" || exit 2
+      fm_shared_source_update_owner_required "${FM_STATE_OVERRIDE:-$FM_HOME/state}" \
+        "${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
+    ) || source_route=$?
+    case "$source_route" in
+      0) echo "$label: skipped: shared-code source requires bin/fm-update.sh; project refresh changed nothing"; return 0 ;;
+      1) ;;
+      *) echo "$label: skipped: shared-code source routing cannot be read safely; project refresh changed nothing"; return 0 ;;
+    esac
   fi
   if ! mode_line=$("$FM_ROOT/bin/fm-project-mode.sh" "$label" 2>/dev/null); then
     echo "$label: skipped: registry entry does not resolve to a delivery posture (run bin/fm-project-mode.sh $label for the refusal)"

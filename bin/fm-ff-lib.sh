@@ -365,6 +365,32 @@ live_secondmate_meta_records() {
   done
 }
 
+# Route primary-source writes to the update owner when a local shared binding
+# is recorded or requested. Caller has already proved the target is its own
+# source root. This is not binding/native validation: 0 means use fm-update,
+# 1 means no local shared route, and 2 means routing cannot be read safely.
+fm_shared_source_update_owner_required() {  # <state> <registry>
+  local state=$1 registry=$2 id home window meta root line
+  if { [ -e "$registry" ] || [ -L "$registry" ]; } \
+    && { [ ! -f "$registry" ] || [ -L "$registry" ] || [ ! -r "$registry" ]; }; then
+    return 2
+  fi
+  while IFS='|' read -r id home window meta; do
+    if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
+    root=$(secondmate_code_root_from_meta "$meta") || return 2
+    [ -z "$root" ] || return 0
+  done < <(live_secondmate_meta_records "$state" "$registry")
+  if [ -f "$registry" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      secondmate_registry_parse_line "$line" || continue
+      if [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] && [ -n "$SECONDMATE_REGISTRY_ROOT" ]; then
+        return 0
+      fi
+    done < "$registry"
+  fi
+  return 1
+}
+
 # Fast-forward one target to a base. Prints its status line. Sets globals for the
 # caller:
 #   FF_STATUS = updated|current|skipped

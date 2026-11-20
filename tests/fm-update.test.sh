@@ -995,6 +995,14 @@ test_reference_update_respects_route_and_view_ownership() {
   expect_code 1 "$rc" 'duplicate declared bindings cannot disappear from update preflight'
   assert_contains "$out" 'shared-code binding cannot be verified' 'ambiguous registry is actionable'
   assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'ambiguous registry does not publish the incompatible source'
+  mv "$w/home/data/secondmates.md" "$w/saved-registry.md"
+  ln -s "$w/saved-registry.md" "$w/home/data/secondmates.md"
+  rc=0
+  out=$(run_update "$w") || rc=$?
+  expect_code 1 "$rc" 'an unreadable registry inventory is not evidence of no shared consumers'
+  assert_contains "$out" 'shared-code registry cannot be read safely' 'unsafe registry is explicit'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'unsafe registry does not permit source publication'
+  assert_equals "$w/saved-registry.md" "$(readlink "$w/home/data/secondmates.md")" 'registry refusal does not repair the retained pointer'
 
   w=$(new_reference_update_world reference-view-conflict)
   old=$(git -C "$w/main" rev-parse HEAD)

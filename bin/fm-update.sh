@@ -253,6 +253,12 @@ update_shared_candidate() {  # <id> <home> <metadata> [declared-root]
 fm_ff_before_advance() {
   local dir=$1 target=$2 id home window meta line
   [ "$dir" = "$FM_ROOT" ] || return 0
+  if { [ -e "$SECONDMATES_MD" ] || [ -L "$SECONDMATES_MD" ]; } \
+    && { [ ! -f "$SECONDMATES_MD" ] || [ -L "$SECONDMATES_MD" ] || [ ! -r "$SECONDMATES_MD" ]; }; then
+    FF_ADVANCE_ERROR='shared-code registry cannot be read safely before source advancement'
+    UPDATE_SHARED_REFUSED=1
+    return 1
+  fi
   while IFS='|' read -r id home window meta; do
     if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
     if ! update_shared_candidate "$id" "$home" "$meta"; then
