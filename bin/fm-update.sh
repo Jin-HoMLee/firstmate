@@ -279,7 +279,7 @@ fm_ff_before_advance() {
   fi
   if [ "$UPDATE_SHARED_VIEWS" = 1 ] \
     && ! secondmate_shared_code_same_reference_shape "$dir" HEAD "$target"; then
-    FF_ADVANCE_ERROR='managed reference layout would change; authorized reference upkeep is required before source advancement'
+    FF_ADVANCE_ERROR='managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement'
     UPDATE_SHARED_REFUSED=1
     return 1
   fi

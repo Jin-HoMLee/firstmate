@@ -834,7 +834,7 @@ new_reference_update_world() {
 }
 
 test_prepared_reference_updates_keep_the_recognized_layout() {
-  local w old out rc kind private_before
+  local w old out rc kind private_before real_git target
   w=$(new_reference_update_world reference-content)
   old=$(git -C "$w/main" rev-parse HEAD)
   private_before=$(git hash-object "$w/shared/.pi/settings.json" "$w/shared/.pi/extensions/private.ts" \
@@ -854,7 +854,7 @@ test_prepared_reference_updates_keep_the_recognized_layout() {
   assert_equals "$private_before" "$(git hash-object "$w/shared/.pi/settings.json" "$w/shared/.pi/extensions/private.ts" \
     "$w/shared/.claude/mods/linked/private.txt" "$w/shared/projects/store")" 'private fixture content stays unchanged'
 
-  for kind in added removed type alias; do
+  for kind in added removed type alias unreadable; do
     w=$(new_reference_update_world "reference-$kind")
     old=$(git -C "$w/main" rev-parse HEAD)
     case "$kind" in
@@ -863,6 +863,7 @@ test_prepared_reference_updates_keep_the_recognized_layout() {
         mkdir -p "$w/home/config"
         printf 'origin main\n' > "$w/home/config/self-update-source"
         ;;
+      unreadable) printf 'content-only target\n' > "$w/seed/bin/tool.sh" ;;
       removed) rm "$w/seed/bin/tool.sh" ;;
       type)
         rm "$w/seed/bin/tool.sh"
@@ -874,12 +875,28 @@ test_prepared_reference_updates_keep_the_recognized_layout() {
         ;;
     esac
     git -C "$w/seed" add -A
-    git -C "$w/seed" commit -qm "synthetic $kind layout change"
+    git -C "$w/seed" commit -qm "synthetic $kind source candidate"
     git -C "$w/seed" push -q origin main
+    real_git=$(type -P git)
+    target=$(git -C "$w/seed" rev-parse HEAD)
+    if [ "$kind" = unreadable ]; then
+      cat > "$w/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_REFERENCE_MAIN" ] \
+  && [ "${3:-}" = ls-tree ] && [ "${6:-}" = "$FM_REFERENCE_FAIL_OBJECT" ]; then
+  echo 'fixture: prospective tree inspection unavailable' >&2
+  exit 1
+fi
+exec "$FM_REFERENCE_REAL_GIT" "$@"
+SH
+      chmod +x "$w/fakebin/git"
+    fi
     rc=0
-    out=$(run_update "$w") || rc=$?
+    out=$(FM_REFERENCE_MAIN="$w/main" FM_REFERENCE_REAL_GIT="$real_git" \
+      FM_REFERENCE_FAIL_OBJECT="$target" run_update "$w") || rc=$?
     assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" "$kind layout must refuse BEFORE maintained bytes move"
-    assert_contains "$out" 'managed reference layout would change' "$kind refusal names the missing transition"
+    assert_contains "$out" 'managed reference layout is changed or unverifiable' "$kind refusal does not claim an unreadable layout was measured"
     assert_contains "$out" 'restart-secondmates: none' "$kind refusal must not settle the old head as the requested update"
     assert_contains "$out" 'nudge-secondmates: none' "$kind refusal must not substitute a nudge"
     expect_code 1 "$rc" "$kind source-update refusal is explicit"
@@ -889,7 +906,7 @@ test_prepared_reference_updates_keep_the_recognized_layout() {
     [ ! -e "$w/home/state/.control-shared.lock" ] && [ ! -L "$w/home/state/.control-shared.lock" ] \
       || fail "$kind refusal leaked a lifecycle lock"
   done
-  pass 'prepared references allow content-only advancement but refuse additions, removals, type and relative-alias changes before source moves'
+  pass 'prepared references allow content-only advancement but refuse changed or unverifiable layouts before source moves'
 }
 
 test_shared_update_uses_lifecycle_locks_and_pins_its_target() {
@@ -983,7 +1000,7 @@ test_reference_update_respects_route_and_view_ownership() {
   rc=0
   out=$(run_update "$w") || rc=$?
   expect_code 1 "$rc" 'a prepared registered view is protected even without a current launch record'
-  assert_contains "$out" 'managed reference layout would change' 'registry backstop participates before advancement'
+  assert_contains "$out" 'managed reference layout is changed or unverifiable' 'registry backstop participates before advancement'
   assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'a missing launch record does not permit an inconsistent view'
   [ ! -e "$w/home/state/shared.meta" ] || fail 'update activated an unlaunched route'
   # An ambiguous id must not make the root field look absent and hide this
