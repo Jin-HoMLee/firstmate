@@ -143,7 +143,9 @@ fm_lint_worker_stop() {
 
 fm_lint_now_ms() {
   if [ -n "${EPOCHREALTIME:-}" ]; then
-    local seconds=${EPOCHREALTIME%.*} micros=${EPOCHREALTIME#*.}
+    # Bash can emit a comma radix; snapshot once before splitting the clock.
+    local now=${EPOCHREALTIME/,/.}
+    local seconds=${now%.*} micros=${now#*.}
     printf '%s\n' "$((seconds * 1000 + 10#${micros:0:3}))"
   else
     printf '%s\n' "$(($(date +%s) * 1000))"
