@@ -748,8 +748,8 @@ test_non_signature_fetch_failure_is_not_retried() {
 }
 
 test_shared_primary_source_uses_the_update_owner() {
-  local kind home code work state data old out ordinary
-  for kind in recorded declared unsafe remote legacy; do
+  local kind home code work state data old out ordinary registry_before
+  for kind in recorded declared unsafe missing-date truncated prose remote legacy; do
     home="$TMP_ROOT/source-owner-$kind"
     state="$home/routing-state"
     data="$home/routing-data"
@@ -778,21 +778,37 @@ test_shared_primary_source_uses_the_update_owner() {
           "$code" "$home/consumer" > "$data/secondmates.md"
         ;;
       unsafe) ln -s "$data/nonexistent" "$data/secondmates.md" ;;
+      missing-date)
+        printf -- '- mate - fixture (root: %s; home: %s; scope: test; projects: none)\n' \
+          "$code" "$home/consumer" > "$data/secondmates.md"
+        ;;
+      truncated) printf -- '- mate\n' > "$data/secondmates.md" ;;
+      prose) printf '# Secondmates\n\nNo entries have been registered.\n' > "$data/secondmates.md" ;;
       remote)
         printf 'kind=secondmate\nhome=%s\ncode_root=%s\nremote_host=example.invalid\n' \
           "$home/consumer" "$code" > "$state/mate.meta"
         ;;
     esac
+    registry_before=
+    if [ -f "$data/secondmates.md" ] && [ ! -L "$data/secondmates.md" ]; then
+      registry_before=$(git hash-object "$data/secondmates.md")
+    fi
     commit_file "$work" AGENTS.md v2 'synthetic source advance'
     git -C "$work" push -q origin main
     out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$code" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" \
       "$ROOT/bin/fm-fleet-sync.sh" "$code" 2>/dev/null)
-    if [ "$kind" = legacy ] || [ "$kind" = remote ]; then
-      assert_equals "$(head_sha "$work")" "$(head_sha "$code")" 'legacy/remote-only self-source project refresh retains its existing behavior'
-    elif [ "$kind" = unsafe ]; then
-      assert_equals "$old" "$(head_sha "$code")" 'an unsafe registry cannot certify no shared-source routing'
-      assert_contains "$out" 'shared-code source routing cannot be read safely' 'unreadable routing is not guessed'
-      assert_equals "$data/nonexistent" "$(readlink "$data/secondmates.md")" 'unsafe registry pointer stays unchanged'
+    if [ "$kind" = legacy ] || [ "$kind" = remote ] || [ "$kind" = prose ]; then
+      assert_equals "$(head_sha "$work")" "$(head_sha "$code")" "$kind self-source project refresh retains its existing behavior"
+    elif [ "$kind" = unsafe ] || [ "$kind" = missing-date ] || [ "$kind" = truncated ]; then
+      assert_equals "$old" "$(head_sha "$code")" "$kind registry cannot certify no shared-source routing"
+      assert_contains "$out" 'shared-code source routing cannot be read safely' "$kind routing is not guessed"
+      if [ "$kind" = unsafe ]; then
+        assert_equals "$data/nonexistent" "$(readlink "$data/secondmates.md")" 'unsafe registry pointer stays unchanged'
+      else
+        assert_absent "$state/mate.meta" "$kind inventory refusal cannot activate a consumer"
+      fi
+      assert_equals "$code/AGENTS.md" "$(readlink "$home/consumer/source-note")" "$kind refusal preserves the reference"
+      assert_equals 'private original' "$(cat "$home/consumer/private.txt")" "$kind refusal preserves private content"
     else
       assert_equals "$old" "$(head_sha "$code")" "$kind shared source must not advance through project refresh"
       assert_contains "$out" 'shared-code source requires bin/fm-update.sh' "$kind route names its existing update owner"
@@ -807,6 +823,9 @@ test_shared_primary_source_uses_the_update_owner() {
         assert_equals "$old" "$(head_sha "$code")" 'a child cannot bypass the source owner through its empty private registry'
         assert_contains "$out" 'shared-code source update belongs to the owning primary' 'child project refresh names the actual owner'
       fi
+    fi
+    if [ -n "$registry_before" ]; then
+      assert_equals "$registry_before" "$(git hash-object "$data/secondmates.md")" "$kind registry bytes remain unchanged"
     fi
     ordinary=$(build_pair "$home" "ordinary-$kind")
     advance_origin "$home" "ordinary-$kind" C1

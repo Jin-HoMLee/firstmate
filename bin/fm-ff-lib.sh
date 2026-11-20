@@ -375,6 +375,10 @@ fm_shared_source_update_owner_required() {  # <state> <registry>
     && { [ ! -f "$registry" ] || [ -L "$registry" ] || [ ! -r "$registry" ]; }; then
     return 2
   fi
+  if [ -f "$registry" ] \
+    && ! secondmate_registry_validate_bindings "$registry" secondmate_registry_path_key; then
+    return 2
+  fi
   while IFS='|' read -r id home window meta; do
     if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
     root=$(secondmate_code_root_from_meta "$meta") || return 2

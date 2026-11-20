@@ -109,7 +109,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
-SECONDMATES_MD="$FM_HOME/data/secondmates.md"
+SECONDMATES_MD="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
 # shellcheck source=bin/fm-ff-lib.sh
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-secondmate-restart-lib.sh
@@ -256,6 +256,12 @@ fm_ff_before_advance() {
   if { [ -e "$SECONDMATES_MD" ] || [ -L "$SECONDMATES_MD" ]; } \
     && { [ ! -f "$SECONDMATES_MD" ] || [ -L "$SECONDMATES_MD" ] || [ ! -r "$SECONDMATES_MD" ]; }; then
     FF_ADVANCE_ERROR='shared-code registry cannot be read safely before source advancement'
+    UPDATE_SHARED_REFUSED=1
+    return 1
+  fi
+  if [ -f "$SECONDMATES_MD" ] \
+    && ! secondmate_registry_validate_bindings "$SECONDMATES_MD" secondmate_registry_path_key; then
+    FF_ADVANCE_ERROR="shared-code binding cannot be verified: $SECONDMATE_REGISTRY_ERROR"
     UPDATE_SHARED_REFUSED=1
     return 1
   fi

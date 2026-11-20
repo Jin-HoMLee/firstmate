@@ -1036,6 +1036,85 @@ test_reference_update_respects_route_and_view_ownership() {
   pass 'shared source updates respect primary ownership, registered prepared views and conflicting originals'
 }
 
+test_registry_only_reference_update_uses_overridden_data() {
+  local w old out rc lock registry_before
+  w=$(new_reference_update_world reference-overridden-data)
+  old=$(git -C "$w/main" rev-parse HEAD)
+  rm "$w/home/state/shared.meta"
+  mkdir "$w/routing-data"
+  mv "$w/home/data/secondmates.md" "$w/routing-data/secondmates.md"
+  printf '\n# Prepared consumers\nOrdinary registry prose.\n' >> "$w/routing-data/secondmates.md"
+  registry_before=$(git hash-object "$w/routing-data/secondmates.md")
+  printf 'new managed path\n' > "$w/seed/bin/new.sh"
+  git -C "$w/seed" add -A
+  git -C "$w/seed" commit -qm 'synthetic overridden registry shape change'
+  git -C "$w/seed" push -q origin main
+  lock="$w/home/state/.control-shared.lock"
+  mkdir "$lock"
+  printf '%s\n' "$$" > "$lock/pid"
+  rc=0
+  out=$(FM_DATA_OVERRIDE="$w/routing-data" run_update "$w") || rc=$?
+  expect_code 1 "$rc" 'an overridden registry-only consumer participates in lifecycle exclusion'
+  assert_contains "$out" 'shared-code lifecycle action is in progress for shared' 'overridden inventory cannot bypass a lifecycle owner'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'busy registry-only lifecycle prevents source publication'
+  assert_equals "$$" "$(cat "$lock/pid")" 'refusal preserves the fixture lifecycle owner'
+  rm "$lock/pid"
+  rmdir "$lock"
+  rc=0
+  out=$(FM_DATA_OVERRIDE="$w/routing-data" run_update "$w") || rc=$?
+  expect_code 1 "$rc" 'an overridden registry-only prepared view prevents incompatible publication'
+  assert_contains "$out" 'managed reference layout is changed or unverifiable' 'overridden inventory validates reference shape while accepting prose'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'the source stays compatible with the unlaunched prepared view'
+  assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" 'the retained home history stays unchanged'
+  assert_equals "$w/main/AGENTS.md" "$(readlink "$w/shared/AGENTS.md")" 'refusal does not replace prepared references'
+  assert_equals "$registry_before" "$(git hash-object "$w/routing-data/secondmates.md")" 'override registry bytes stay unchanged'
+  assert_absent "$w/home/state/shared.meta" 'preflight cannot activate a registry-only consumer'
+  assert_absent "$lock" 'reference-shape refusal releases its lifecycle lock'
+  pass 'overridden registry-only consumers retain lifecycle and prepared-reference protections'
+}
+
+test_reference_update_rejects_malformed_registry_entries() {
+  local w old out rc kind registry_before
+  for kind in missing-date truncated; do
+    w=$(new_reference_update_world "reference-malformed-$kind")
+    old=$(git -C "$w/main" rev-parse HEAD)
+    rm "$w/home/state/shared.meta"
+    case "$kind" in
+      missing-date)
+        printf -- '- shared - synthetic (root: %s; home: %s; scope: test; projects: none)\n' \
+          "$w/main" "$w/shared" > "$w/home/data/secondmates.md"
+        ;;
+      truncated) printf -- '- shared\n' > "$w/home/data/secondmates.md" ;;
+    esac
+    registry_before=$(git hash-object "$w/home/data/secondmates.md")
+    rm "$w/seed/bin/tool.sh"
+    git -C "$w/seed" add -A
+    git -C "$w/seed" commit -qm 'synthetic managed path removal'
+    git -C "$w/seed" push -q origin main
+    rc=0
+    out=$(run_update "$w") || rc=$?
+    expect_code 1 "$rc" "$kind registry entries cannot hide prepared consumers"
+    assert_contains "$out" 'malformed secondmate registry entry' "$kind malformed routing is actionable"
+    assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" "$kind invalid inventory prevents source publication"
+    assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" "$kind refusal preserves retained home history"
+    assert_equals "$w/main/bin/tool.sh" "$(readlink "$w/shared/bin/tool.sh")" "$kind refusal leaves the managed reference intact"
+    assert_present "$w/shared/bin/tool.sh" "$kind refusal never breaks the managed reference"
+    assert_equals "$registry_before" "$(git hash-object "$w/home/data/secondmates.md")" "$kind registry bytes are not repaired"
+    assert_absent "$w/home/state/shared.meta" "$kind refusal does not activate a consumer"
+    assert_absent "$w/home/state/.control-shared.lock" "$kind refusal leaves no lifecycle lock"
+    assert_contains "$out" 'restart-secondmates: none' "$kind refusal cannot schedule a replacement"
+  done
+  w=$(new_world registry-prose)
+  printf '# Secondmates\n\nNo entries have been registered.\n' > "$w/home/data/secondmates.md"
+  bump_origin "$w" instr
+  out=$(run_update "$w") || fail 'ordinary non-entry prose must not prevent publication'
+  assert_contains "$out" 'firstmate: updated ' 'ordinary prose is not a malformed route'
+  assert_equals "$(git -C "$w/seed" rev-parse HEAD)" "$(git -C "$w/main" rev-parse HEAD)" 'a prose-only registry permits normal source publication'
+  pass 'source publication rejects malformed entry rows but accepts ordinary non-entry prose'
+}
+
+test_registry_only_reference_update_uses_overridden_data
+test_reference_update_rejects_malformed_registry_entries
 test_prepared_reference_updates_keep_the_recognized_layout
 test_shared_update_uses_lifecycle_locks_and_pins_its_target
 test_reference_update_respects_route_and_view_ownership
