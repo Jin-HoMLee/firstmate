@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { contextDirectory, shellCommand, setupToolExecuteBefore } from "./lib/fm-opencode2.js";
 
 function runProcess(command, args) {
   return new Promise((done) => {
@@ -35,4 +36,28 @@ export const FmPrimaryUpstreamWriteCheck = async ({ directory, worktree }) => {
       throw new Error(result.stderr.trim() || "denied by the protected-upstream write guard");
     },
   };
+};
+
+function installUpstreamWriteCheck(ctx) {
+  const anchor = contextDirectory(ctx);
+  let rootPromise = null;
+  const getRoot = () => (rootPromise ??= resolveRoot(anchor));
+  setupToolExecuteBefore(ctx, async (event) => {
+    const command = shellCommand(event);
+    if (!command) return;
+    const root = await getRoot();
+    if (!root) return;
+
+    const result = await runProcess(`${root}/bin/fm-upstream-write-pretool-check.sh`, ["--command", command]);
+    if (result.code !== 2) return;
+    throw new Error(result.stderr.trim() || "denied by the protected-upstream write guard");
+  });
+}
+
+export default {
+  id: "fm.primary.upstream-write-check",
+  server: FmPrimaryUpstreamWriteCheck,
+  setup(ctx) {
+    installUpstreamWriteCheck(ctx);
+  },
 };

@@ -92,6 +92,48 @@ expect_refused gh api graphql -R someuser/somerepo -f 'query=mutation { createRe
 expect_allowed gh api graphql -f 'query={ organization(login:"kunchenguid"){ id } }'
 pass "gh api graphql mutations refuse through the normal path regardless of -R scope"
 
+mutation='query=mutation { addComment(input:{subjectId:"protected-PR-node-id",body:"text"}) { clientMutationId } }'
+query='query={ organization(login:"kunchenguid"){ id } }'
+for tool in gh gh-axi; do
+  expect_refused "$tool" api --method POST graphql -f "$mutation"
+  expect_refused "$tool" api -X POST graphql -f "$mutation"
+  expect_refused "$tool" api --hostname github.com --method POST graphql -f "$mutation"
+  expect_refused "$tool" api -H 'Accept: application/vnd.github+json' graphql -f "$mutation"
+  expect_refused "$tool" api -f "$mutation" --method POST graphql
+  expect_refused "$tool" api --cache 1h --preview test --jq . graphql -f "$mutation"
+  expect_refused "$tool" api --input /dev/null graphql
+  expect_allowed "$tool" api --method POST graphql -f "$query"
+  expect_allowed "$tool" api -X POST -f "$query" graphql
+  expect_allowed "$tool" api -H 'Accept: application/vnd.github+json' graphql -f "$query"
+  expect_allowed "$tool" api --hostname github.com --method GET /repos/kunchenguid/dotfiles/commits -f sha=main
+  expect_allowed "$tool" api --method POST /repos/Jin-HoMLee/dotfiles/issues -f title=intended
+done
+expect_refused gh-axi api POST graphql -f "$mutation"
+expect_allowed gh-axi api POST graphql -f "$query"
+expect_refused gh-axi api POST /repos/kunchenguid/dotfiles/issues -f title=test
+pass "API option values do not hide GraphQL endpoints or change permitted reads and fork writes"
+
+parent_shims=$SHIMS
+child_shims="$TMP_ROOT/child-shims"
+"$GUARD" install-shims "$child_shims" || fail "child guard shims should install"
+cat >"$TMP_ROOT/guard-hops.sh" <<'SH'
+FM_TEST_GUARD_HOPS=$(( ${FM_TEST_GUARD_HOPS:-0} + 1 ))
+export FM_TEST_GUARD_HOPS
+if [ "$FM_TEST_GUARD_HOPS" -gt 12 ]; then
+  printf 'guard delegation cycled\n' >&2
+  exit 97
+fi
+SH
+SHIMS="$child_shims:$parent_shims:$child_shims"
+for tool in gh gh-axi; do
+  BASH_ENV="$TMP_ROOT/guard-hops.sh" FM_TASK_ID=nested-worker expect_allowed "$tool" pr view 48 --repo kunchenguid/dotfiles
+  BASH_ENV="$TMP_ROOT/guard-hops.sh" FM_TASK_ID=nested-worker expect_allowed "$tool" pr create --repo Jin-HoMLee/dotfiles --title intended
+  BASH_ENV="$TMP_ROOT/guard-hops.sh" FM_TASK_ID=nested-worker expect_refused "$tool" pr merge 48 --repo kunchenguid/dotfiles
+  BASH_ENV="$TMP_ROOT/guard-hops.sh" FM_TASK_ID=nested-worker expect_refused "$tool" api --method POST graphql -f "$mutation"
+done
+SHIMS=$parent_shims
+pass "nested guard directories delegate reads and personal-fork writes without cycling or permitting upstream writes"
+
 expect_refused gh-axi pr create --title accidental
 expect_refused gh pr create --title accidental
 assert_contains "$(cat "$TMP_ROOT/err")" "must name its exact repository" \
@@ -550,6 +592,39 @@ FM_ROOT_OVERRIDE="$primary" "$primary/bin/fm-upstream-write-pretool-check.sh" \
 [ "$status" -eq 2 ] || fail "plain primary PreToolUse transport should deny the ANSI-C quoted protected write, got $status"
 pass "ordinary primary shell commands share the same write guard"
 
+PLUGIN="$ROOT/.opencode/plugins/fm-primary-upstream-write-check.js" WORKTREE="$primary" node --input-type=module <<'JS' || fail "OpenCode upstream-write hooks should enforce the existing policy on both runtimes"
+import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
+
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+const root = process.env.WORKTREE;
+assert.equal(mod.default.id, "fm.primary.upstream-write-check");
+assert.equal(mod.default.server, mod.FmPrimaryUpstreamWriteCheck);
+const legacy = await mod.FmPrimaryUpstreamWriteCheck({ directory: root, worktree: root });
+let hook;
+mod.default.setup({
+  location: { project: { directory: root } },
+  tool: { hook: (name, handler) => { assert.equal(name, "execute.before"); hook = handler; } },
+});
+assert.equal(typeof hook, "function");
+const runtimes = [
+  { call: (command) => legacy["tool.execute.before"]({ tool: "bash" }, { args: { command } }),
+    other: (tool, command) => legacy["tool.execute.before"]({ tool }, { args: { command } }) },
+  { call: (command) => hook({ tool: "shell", input: { command } }),
+    other: (tool, command) => hook({ tool, input: { command } }) },
+];
+for (const runtime of runtimes) {
+  await assert.rejects(runtime.call("gh pr merge 48 --repo kunchenguid/dotfiles"), /protected-upstream-write/);
+  await assert.rejects(runtime.call(`gh api --method POST graphql -f 'query=mutation { addComment(input:{subjectId:"protected-id",body:"text"}) { clientMutationId } }'`), /protected-upstream-write/);
+  await runtime.call("gh pr view 48 --repo kunchenguid/dotfiles");
+  await runtime.call(`gh api --method POST graphql -f 'query={ organization(login:"kunchenguid"){ id } }'`);
+  await runtime.call("gh pr create --repo Jin-HoMLee/dotfiles --title intended");
+  for (const tool of ["read", "mcp_runner"]) await runtime.other(tool, "gh pr merge 48 --repo kunchenguid/dotfiles");
+  await runtime.call(undefined);
+}
+console.log("ok - OpenCode 1 and 2 upstream-write hooks block protected writes and preserve reads and personal-fork writes");
+JS
+
 words="$TMP_ROOT/captain-words.txt"
 printf '%s\n' 'Open exactly one test issue in kunchenguid/dotfiles.' >"$words"
 AUTH_HOME="$TMP_ROOT/home"
@@ -574,6 +649,29 @@ FM_TASK_ID=worker FM_HOME="$AUTH_HOME" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/us
 assert_contains "$(cat "$TMP_ROOT/worker.err")" "workers cannot authorize" \
   "worker refusal did not name the authority boundary"
 pass "the only override is exact, audited, and unavailable to workers"
+
+graphql_home="$TMP_ROOT/graphql-auth-home"
+printf '%s\n' 'Add exactly one test comment in kunchenguid/dotfiles.' >"$TMP_ROOT/graphql-words.txt"
+for tool in gh gh-axi; do
+  FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
+    "$tool" api --method POST graphql -R kunchenguid/dotfiles -f "$mutation" \
+    || fail "explicit GraphQL authorization should still execute and audit"
+  record=$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
+  [ -n "$record" ] || fail "GraphQL authorization did not create an audit record"
+  assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "GraphQL authorization omitted the exact repo"
+  assert_contains "$(cat "$record")" 'result=exit-0' "GraphQL authorization did not record execution success"
+  before=$(wc -l <"$LOG" | tr -d ' ')
+  status=0
+  FM_TASK_ID=nested-worker FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" \
+    BASH_ENV="$TMP_ROOT/guard-hops.sh" PATH="$child_shims:$parent_shims:$STUBS:/usr/bin:/bin" \
+    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
+    "$tool" api --method POST graphql -R kunchenguid/dotfiles -f "$mutation" \
+    >"$TMP_ROOT/nested-worker.out" 2>"$TMP_ROOT/nested-worker.err" || status=$?
+  [ "$status" -eq 2 ] || fail "nested workers must not authorize upstream writes"
+  [ "$(wc -l <"$LOG" | tr -d ' ')" = "$before" ] || fail "nested worker authorization reached the forge"
+done
+pass "GraphQL option ordering retains exact audited authorization and the nested-worker authority boundary"
 
 audit_stubs="$TMP_ROOT/audit-stubs"
 mkdir -p "$audit_stubs"

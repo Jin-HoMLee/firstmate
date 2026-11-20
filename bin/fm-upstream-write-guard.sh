@@ -171,7 +171,7 @@ repo_subsubcommand() {
   return 1
 }
 
-TOP='' SUB='' TARGET='' TRANSFER_DEST='' MUTATION=0 REPO_SCOPED=0
+TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD='' MUTATION=0 REPO_SCOPED=0
 set_target() {
   local candidate normalized
   candidate=$1
@@ -185,10 +185,22 @@ set_target() {
 }
 
 parse_top_sub_and_target() {
-  local tool=$1 arg expect_repo=0 seen_top=0 seen_sub=0 previous=
+  local tool=$1 arg expect_repo=0 expect_api_value=0 seen_top=0 seen_sub=0 previous=
   shift
-  TOP='' SUB='' TARGET='' TRANSFER_DEST=''
+  TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD=''
   for arg in "$@"; do
+    if [ "$expect_api_value" -eq 1 ]; then
+      expect_api_value=0
+      continue
+    fi
+    if [ "$TOP" = api ]; then
+      case "$arg" in
+        -X|--method|-H|--header|-f|--raw-field|-F|--field|--input|-q|--jq|-t|--template|--hostname|--cache|-p|--preview)
+          expect_api_value=1
+          continue
+          ;;
+      esac
+    fi
     if [ "$expect_repo" -eq 1 ]; then
       set_target "$arg" explicit-repository
       expect_repo=0
@@ -212,6 +224,11 @@ parse_top_sub_and_target() {
     fi
     if [ "$seen_sub" -eq 0 ]; then
       case "$arg" in -*) previous=$arg; continue ;; esac
+      if [ "$TOP" = api ] && [ "$tool" = gh-axi ] && [ -z "$API_METHOD" ]; then
+        case "$arg" in
+          GET|POST|PUT|PATCH|DELETE|HEAD) API_METHOD=$arg; continue ;;
+        esac
+      fi
       SUB=$arg
       seen_sub=1
     fi
@@ -245,6 +262,7 @@ classify_gh() {
   MUTATION=0
   REPO_SCOPED=0
   parse_top_sub_and_target "$tool" "$@"
+  if [ -n "$API_METHOD" ]; then method=$API_METHOD; method_explicit=1; fi
 
   for arg in "$@"; do
     if [ "$expect_value" -eq 1 ]; then
@@ -332,9 +350,6 @@ classify_gh() {
           -X|--method) expect_method=1; method_explicit=1 ;;
           -X=*|--method=*) method=${arg#*=}; method_explicit=1 ;;
           -X?*) method=${arg#-X}; method_explicit=1 ;;
-          GET|POST|PUT|PATCH|DELETE|HEAD)
-            if [ "$arg" = "$SUB" ]; then method=$arg; method_explicit=1; fi
-            ;;
           -f|--field|-F|--raw-field|--input) has_fields=1 ;;
           -f=*|--field=*|-F=*|--raw-field=*|--input=*) has_fields=1 ;;
           -f?*|-F?*) has_fields=1 ;;
@@ -663,6 +678,14 @@ case "$cmd" in
     shift 3
     case "$tool" in gh|gh-axi) ;; *) usage ;; esac
     check_gh "$tool" "$@" || exit $?
+    remaining_path='' path_separator=''
+    IFS=: read -r -a path_dirs <<< "$PATH"
+    for dir in "${path_dirs[@]}"; do
+      [ "$dir" = "$shim" ] && continue
+      remaining_path=$remaining_path$path_separator$dir
+      path_separator=:
+    done
+    export PATH=$remaining_path
     actual=$(locate_real_tool "$tool" "$shim" 2>/dev/null) || die "cannot find the real $tool executable after the guard shim"
     exec "$actual" "$@"
     ;;
