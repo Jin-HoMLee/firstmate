@@ -583,6 +583,10 @@ TREEHOUSE_SLOT_LOCK_REQUIRED=0
 if [ -f "$META" ] && [ ! -L "$META" ]; then
   TEARDOWN_LOCK_KIND=$(fm_meta_get "$META" kind)
   [ -n "$TEARDOWN_LOCK_KIND" ] || TEARDOWN_LOCK_KIND=ship
+  if [ "$TEARDOWN_LOCK_KIND" = secondmate ] && grep -q '^code_root=' "$META"; then
+    echo 'REFUSED: shared-code home retirement is unsupported; preserve the operational home and its retained source' >&2
+    exit 1
+  fi
   TEARDOWN_LOCK_BACKEND=$(fm_meta_get "$META" backend)
   [ -n "$TEARDOWN_LOCK_BACKEND" ] || TEARDOWN_LOCK_BACKEND=tmux
   TEARDOWN_LOCK_WT=$(fm_meta_get "$META" worktree)
@@ -677,6 +681,10 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
 }
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
+if [ "$TEARDOWN_META_KIND" = secondmate ] && grep -q '^code_root=' "$META"; then
+  echo 'REFUSED: shared-code home retirement is unsupported; preserve the operational home and its retained source' >&2
+  exit 1
+fi
 # Retiring a persistent secondmate is main's alone in both postures; the kind
 # is read under the metadata lock (role partition: bin/fm-lease-lib.sh).
 [ "$TEARDOWN_META_KIND" != secondmate ] || fm_lease_forbid_branch "secondmate retirement (fm-teardown)"
@@ -2840,6 +2848,11 @@ registered_descendant_home_for_removal() {
         registered_home=$SECONDMATE_REGISTRY_HOME
         registered_abs=$(removal_target_abs_path "$registered_home" 2>/dev/null || true)
         [ -n "$registered_abs" ] || continue
+        if [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] && [ -n "$SECONDMATE_REGISTRY_ROOT" ] \
+          && { [ "$registered_abs" = "$target" ] || path_is_ancestor_of "$target" "$registered_abs"; }; then
+          echo "REFUSED: shared-code home $id cannot be retired by legacy descendant cleanup" >&2
+          return 2
+        fi
         [ "$registered_abs" = "$target" ] && continue
         if path_is_ancestor_of "$target" "$registered_abs"; then
           printf '%s\t%s\n' "$id" "$registered_abs"
@@ -3261,6 +3274,10 @@ preflight_descendant_task_locks() {
       return 1
     }
     if [ "$kind" = secondmate ]; then
+      if grep -q '^code_root=' "$meta"; then
+        echo "REFUSED: shared-code descendant $task_id cannot be retired; forced teardown changed nothing" >&2
+        return 1
+      fi
       child_wt=$(meta_value "$meta" worktree)
       child_home=$(meta_value "$meta" home)
       [ -n "$child_home" ] || child_home=$child_wt

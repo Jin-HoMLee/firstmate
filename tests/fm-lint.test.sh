@@ -1267,6 +1267,69 @@ SH
   pass "fm-lint.sh passes a clean fixture"
 }
 
+test_clock_radix_preserves_worker_results_and_milliseconds() {
+  if ! pinned_ready; then
+    pass "SKIP (ShellCheck $REQUIRED not resolved): clock radix regression"
+    return
+  fi
+  local tmp clock jobs mode rc expected roots_log out
+  local -a targets
+  tmp=$(fm_test_tmproot fm-lint-clock-radix)
+  cat > "$tmp/clock-env.sh" <<'SH'
+# Inject clock spelling without depending on installed locales. Refuse recursive
+# workers so a broken clock cannot fan out after arithmetic-error fallthrough.
+if [ "${1:-}" = --internal-worker ]; then
+  [ "${FM_TEST_CLOCK_WORKER:-0}" = 0 ] || exit 2
+  export FM_TEST_CLOCK_WORKER=1
+fi
+unset EPOCHREALTIME
+EPOCHREALTIME=${FM_TEST_CLOCK:?}
+SH
+  printf '#!/usr/bin/env bash\nprintf "ok\\n"\n' > "$tmp/good.sh"
+  cat > "$tmp/bad.sh" <<'SH'
+#!/usr/bin/env bash
+main() {
+  local a= b=
+  printf '%s\n' "$a$b"
+}
+main
+SH
+  for clock in 1795175486.083693 1795175486,083693; do
+    for jobs in 1 2; do
+      for mode in clean finding; do
+        targets=("$tmp/good.sh")
+        expected=0
+        if [ "$mode" = finding ]; then
+          targets+=("$tmp/bad.sh")
+          expected=1
+        fi
+        rc=0
+        out=$(BASH_ENV="$tmp/clock-env.sh" FM_TEST_CLOCK="$clock" \
+          FM_TEST_CLOCK_WORKER=0 FM_LINT_JOBS="$jobs" FM_LINT_REQUIRE_BOUNDS=0 \
+          "${BASH:-bash}" "$LINT" --telemetry "$tmp/lint.tsv" "${targets[@]}" 2>&1) || rc=$?
+        [ "$rc" -eq "$expected" ] \
+          || fail "clock $clock jobs=$jobs mode=$mode returned $rc"$'\n'"$out"
+        if [ "$mode" = finding ]; then
+          assert_contains "$out" "SC1007" "clock spelling hid a real lint finding"
+        fi
+        roots_log="$tmp/lint.roots.tsv"
+        awk -F '\t' -v count="${#targets[@]}" -v expected="$expected" '
+          $1 == "begin" { begun++; if ($6 != "1795175486083") bad=1 }
+          $1 == "end" {
+            ended++
+            if ($6 != "1795175486083" || $7 != "1795175486083" || $8 != 0) bad=1
+            if ($3 ~ /good\.sh$/ && ($9 != 0 || $10 != "ok")) bad=1
+            if ($3 ~ /bad\.sh$/ && ($9 != 1 || $10 != "findings")) bad=1
+          }
+          $1 == "meta" && $2 == "result_exit" { result=$3; saw_result=1 }
+          END { exit (begun == count && ended == count && !bad && saw_result && result == expected) ? 0 : 1 }
+        ' "$roots_log" || fail "clock $clock lost worker results or millisecond precision"
+      done
+    done
+  done
+  pass "dot and comma clocks preserve clean/finding results and milliseconds with one or two workers"
+}
+
 test_jobs_are_deterministic_and_complete() {
   if ! pinned_ready; then
     pass "SKIP (ShellCheck $REQUIRED not resolved): deterministic bounded jobs check"
@@ -2048,6 +2111,7 @@ test_rejects_direct_beads_cli_invocations
 test_rejects_direct_beads_cli_in_explicit_core_path
 test_ignores_ambient_shellcheck_opts
 test_clean_fixture_passes
+test_clock_radix_preserves_worker_results_and_milliseconds
 test_jobs_are_deterministic_and_complete
 test_worker_trees_stop_on_signal
 test_root_deadline_names_the_root_and_reaps_the_tree

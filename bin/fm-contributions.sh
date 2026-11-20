@@ -8,7 +8,7 @@
 #   fm-contributions.sh verdict <task> <url> <judged-head> <source-url> <captain|fleet|maintainer|nobody> <summary>
 #   fm-contributions.sh ack <task> <url> <event-token>
 #   fm-contributions.sh retire <task> <url> captain <reason>
-#   fm-contributions.sh arm [--if-owned]
+#   fm-contributions.sh arm [--if-owned|--refresh-existing]
 #   fm-contributions.sh owned
 #   fm-contributions.sh enroll <task> <pr-url>
 #
@@ -168,6 +168,9 @@
 #
 # arm registers the existing authenticated custom-check path. Startup and PR
 # registration call it; when filing a linked upstream issue, call arm as well.
+# arm --if-owned also refreshes an already registered check without current
+# contribution rows. arm --refresh-existing refreshes only a registered check;
+# absent artifacts are a no-op and untrusted artifacts are preserved/refused.
 # jq_lib receives literal jq programs, not shell expressions.
 # shellcheck disable=SC2016
 set -eu
@@ -185,6 +188,8 @@ export FM_HOME FM_STATE_OVERRIDE="$STATE"
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-path-lib.sh
 . "$SCRIPT_DIR/fm-path-lib.sh"
+# shellcheck source=bin/fm-check-lib.sh
+. "$SCRIPT_DIR/fm-check-lib.sh"
 
 fail() { printf 'fm-contributions: %s\n' "$*" >&2; exit 1; }
 usage() { sed -n '2,/^set -eu$/s/^# \{0,1\}//p' "$0"; }
@@ -218,6 +223,7 @@ review_bots() { # config/contribution-review-bots -> JSON array of logins
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-contributions.XXXXXX")
 LOCK_HELD=0
 cleanup() {
+  fm_custom_check_snapshot_cleanup
   [ "$LOCK_HELD" = 0 ] || fm_lock_release "$STATE/.contributions.lock" || true
   rm -rf -- "$TMP"
 }
@@ -747,31 +753,99 @@ poll() {
 }
 
 arm() {
-  local device staged
+  local device staged refresh=0 line key value new_exec old_exec finished=0 budget_seen=0 reply_seen=0
+  local literal_path_regex='^/([[:alnum:]/_.:@%+,=-]|\\.)*$'
   local -a shim
   acquire
-  if [ "${1:-}" = --if-owned ]; then
+  if [ "${1:-}" = --refresh-existing ]; then
+    if [ ! -e "$STATE/contributions.check.sh" ] && [ ! -L "$STATE/contributions.check.sh" ] \
+      && [ ! -e "$STATE/contributions.check-trust" ] && [ ! -L "$STATE/contributions.check-trust" ]; then
+      return 0
+    fi
+    refresh=1
+  elif [ "${1:-}" = --if-owned ] && fm_custom_check_registered "$STATE" contributions; then
+    refresh=1
+  fi
+  if [ "${1:-}" = --if-owned ] && [ "$refresh" = 0 ]; then
     get_input; read_saved
     if [ "$ERRORS" -eq 0 ] && ! jq_lib -ne --slurpfile input "$TMP/input.json" \
       --slurpfile saved "$TMP/saved.json" 'known($input[0];$saved[0]) | length > 0' >/dev/null; then
       return 0
     fi
   fi
+  new_exec="exec $(printf '%q' "$SCRIPT_DIR/fm-contributions.sh") poll"
+  shim=('#!/usr/bin/env bash' "export FM_ROOT_OVERRIDE=$(printf '%q' "$FM_ROOT")")
+  if [ "$refresh" = 1 ]; then
+    # Preserve this producer's serialized private selectors and numeric policy
+    # verbatim. Never source/evaluate the old check or infer per-home policy
+    # from the updating parent's environment. Unknown/custom formats stay put.
+    fm_custom_check_snapshot_prepare "$STATE" contributions \
+      || fail 'existing contribution check is not registered; leaving its files unchanged'
+    [ "$(wc -c < "$FM_CUSTOM_CHECK_SNAPSHOT")" -eq "$(LC_ALL=C tr -d '\0' < "$FM_CUSTOM_CHECK_SNAPSHOT" | wc -c)" ] \
+      || fail 'unsupported NUL-bearing check; leaving its files unchanged'
+    old_exec="exec $(printf '%q' "$FM_HOME/bin/fm-contributions.sh") poll"
+    {
+      IFS= read -r line && [ "$line" = '#!/usr/bin/env bash' ] || fail 'unsupported existing check format; leaving its files unchanged'
+      IFS= read -r line || fail 'incomplete existing check; leaving its files unchanged'
+      case "$line" in
+        'export FM_ROOT_OVERRIDE='*)
+          [ "$line" = "export FM_ROOT_OVERRIDE=$(printf '%q' "$FM_HOME")" ] \
+            || [ "$line" = "export FM_ROOT_OVERRIDE=$(printf '%q' "$FM_ROOT")" ] \
+            || fail 'unsupported existing check code root; leaving its files unchanged'
+          IFS= read -r line || fail 'incomplete existing check' ;;
+      esac
+      for key in FM_HOME FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_CONFIG_OVERRIDE; do
+        case "$line" in "export $key="*) ;; *) fail 'unsupported existing check selectors; leaving its files unchanged' ;; esac
+        case "$key" in
+          FM_HOME) [ "$line" = "export FM_HOME=$(printf '%q' "$FM_HOME")" ] || fail 'existing check selects another home; leaving its files unchanged' ;;
+          FM_STATE_OVERRIDE) [ "$line" = "export FM_STATE_OVERRIDE=$(printf '%q' "$STATE")" ] || fail 'existing check selects another state directory; leaving its files unchanged' ;;
+          FM_DATA_OVERRIDE|FM_CONFIG_OVERRIDE)
+            value=${line#*=}
+            [[ "$value" =~ $literal_path_regex ]] \
+              || fail 'unsupported existing check private selector; leaving its files unchanged' ;;
+        esac
+        shim+=("$line")
+        IFS= read -r line || fail 'incomplete existing check; leaving its files unchanged'
+      done
+      while :; do
+        [ "$finished" = 0 ] || fail 'unsupported trailing check content; leaving its files unchanged'
+        case "$line" in
+          'export FM_CONTRIBUTIONS_BUDGET='*)
+            value=${line#export FM_CONTRIBUTIONS_BUDGET=}
+            case "$value" in ''|*[!0-9]*) fail 'unsupported existing check budget' ;; esac
+            [ "$budget_seen" = 0 ] || fail 'duplicate existing check budget'
+            budget_seen=1; shim+=("$line") ;;
+          'export FM_CONTRIBUTIONS_REPLY_AGE='*)
+            value=${line#export FM_CONTRIBUTIONS_REPLY_AGE=}
+            case "$value" in ''|*[!0-9]*) fail 'unsupported existing check reply policy' ;; esac
+            [ "$reply_seen" = 0 ] || fail 'duplicate existing check reply policy'
+            reply_seen=1; shim+=("$line") ;;
+          "$old_exec"|"$new_exec") finished=1 ;;
+          *) fail 'unsupported existing check source; leaving its files unchanged' ;;
+        esac
+        IFS= read -r line || {
+          [ -z "$line" ] || fail 'unsupported trailing check content; leaving its files unchanged'
+          break
+        }
+      done
+    } < "$FM_CUSTOM_CHECK_SNAPSHOT"
+    [ "$finished" = 1 ] || fail 'incomplete existing check; leaving its files unchanged'
+  else
+    shim+=("export FM_HOME=$(printf '%q' "$FM_HOME")"
+      "export FM_STATE_OVERRIDE=$(printf '%q' "$STATE")"
+      "export FM_DATA_OVERRIDE=$(printf '%q' "$DATA")"
+      "export FM_CONFIG_OVERRIDE=$(printf '%q' "$CONFIG")")
+    if [ -n "${FM_CONTRIBUTIONS_BUDGET:-}" ]; then
+      shim+=("export FM_CONTRIBUTIONS_BUDGET=$(printf '%q' "$FM_CONTRIBUTIONS_BUDGET")")
+    fi
+    if [ -n "${FM_CONTRIBUTIONS_REPLY_AGE:-}" ]; then
+      shim+=("export FM_CONTRIBUTIONS_REPLY_AGE=$(printf '%q' "$FM_CONTRIBUTIONS_REPLY_AGE")")
+    fi
+  fi
+  shim+=("$new_exec")
   device=$(fm_pr_file_device "$STATE")
   fm_pr_regular_destination_on_device_or_absent "$STATE/contributions.check.sh" "$device" || fail 'unsafe check destination'
   staged=$(umask 077; mktemp "$STATE/.contributions-check.XXXXXX")
-  shim=('#!/usr/bin/env bash'
-    "export FM_HOME=$(printf '%q' "$FM_HOME")"
-    "export FM_STATE_OVERRIDE=$(printf '%q' "$STATE")"
-    "export FM_DATA_OVERRIDE=$(printf '%q' "$DATA")"
-    "export FM_CONFIG_OVERRIDE=$(printf '%q' "$CONFIG")")
-  if [ -n "${FM_CONTRIBUTIONS_BUDGET:-}" ]; then
-    shim+=("export FM_CONTRIBUTIONS_BUDGET=$(printf '%q' "$FM_CONTRIBUTIONS_BUDGET")")
-  fi
-  if [ -n "${FM_CONTRIBUTIONS_REPLY_AGE:-}" ]; then
-    shim+=("export FM_CONTRIBUTIONS_REPLY_AGE=$(printf '%q' "$FM_CONTRIBUTIONS_REPLY_AGE")")
-  fi
-  shim+=("exec $(printf '%q' "$SCRIPT_DIR/fm-contributions.sh") poll")
   printf '%s\n' "${shim[@]}" > "$staged"
   chmod 700 "$staged"
   mv -f -- "$staged" "$STATE/contributions.check.sh"

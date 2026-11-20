@@ -502,6 +502,22 @@ test_home_seed_refuses_empty_charter_fields() {
   pass "home seeding refuses empty normalized charter fields"
 }
 
+test_reseed_preserves_declared_local_shared_code_root() {
+  local home sub code
+  home="$TMP_ROOT/shared-reseed-parent"
+  sub="$TMP_ROOT/shared-reseed-home"
+  code="$TMP_ROOT/shared-reseed-code"
+  mkdir -p "$home/"{projects,data,state}
+  make_firstmate_git_root "$code"
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='synthetic domain' \
+    "$ROOT/bin/fm-home-seed.sh" domain "$sub" --no-projects >/dev/null || fail 'initial seed failed'
+  printf -- '- domain - synthetic domain (root: %s; home: %s; scope: synthetic domain; projects: ; added 2026-01-01)\n' \
+    "$code" "$sub" > "$home/data/secondmates.md"
+  FM_HOME="$home" "$ROOT/bin/fm-home-seed.sh" domain "$sub" --no-projects >/dev/null || fail 'reseed failed'
+  assert_grep "(root: $code; home: $sub;" "$home/data/secondmates.md" 'reseed must not silently revert the declared code root'
+  pass 'reseed retains an explicitly declared local shared-code route'
+}
+
 test_home_seed_no_projects_end_to_end() {
   # A domain whose subject is the firstmate repo itself needs no project clones:
   # the deliberate --no-projects signal scaffolds, seeds, registers, and spawns a
@@ -1820,6 +1836,64 @@ SH
   pass "later teardown refusals preserve active process-event sources"
 }
 
+test_shared_code_retirement_refuses_even_with_force() {
+  local home sub code fakebin log err rc=0
+  home="$TMP_ROOT/shared-retire-parent"
+  sub="$TMP_ROOT/shared-retire-home"
+  code="$TMP_ROOT/shared-retire-code"
+  mkdir -p "$home/state" "$home/data" "$sub/data"
+  mark_firstmate_home "$sub"
+  make_firstmate_git_root "$code"
+  printf 'domain\n' > "$sub/.fm-secondmate-home"
+  printf 'preserved private record\n' > "$sub/data/private"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$sub"
+  printf 'code_root=%s\ncode_head=%s\n' "$code" "$(git -C "$code" rev-parse HEAD)" >> "$home/state/domain.meta"
+  fakebin=$(make_fake_tmux "$TMP_ROOT/shared-retire-fake")
+  log="$TMP_ROOT/shared-retire-fake/tmux.log"
+  err="$TMP_ROOT/shared-retire.err"
+  PATH="$fakebin:$PATH" FM_ROOT_OVERRIDE="$code" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" \
+    "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>"$err" || rc=$?
+  [ "$rc" -ne 0 ] || fail 'unsupported shared-code retirement succeeded'
+  assert_grep 'shared-code home retirement is unsupported' "$err" 'retirement must report its unsupported axis'
+  assert_present "$sub/data/private" 'shared home must remain in place'
+  assert_present "$home/state/domain.meta" 'shared home custody must remain recorded'
+  assert_no_regex 'kill-window|kill-session' "$log" 'refusal must precede endpoint deletion'
+  pass 'shared-code retirement refuses even with force and preserves home, records and endpoint'
+}
+
+test_forced_parent_retirement_preserves_shared_code_descendant() {
+  local home sub child code fakebin log err rc=0
+  home="$TMP_ROOT/shared-descendant-parent"
+  sub="$TMP_ROOT/shared-descendant-home"
+  child="$TMP_ROOT/shared-descendant-child"
+  code="$TMP_ROOT/shared-descendant-code"
+  mkdir -p "$home/"{state,data} "$sub/"{state,data} "$child/"{state,data}
+  mark_firstmate_home "$sub"
+  mark_firstmate_home "$child"
+  make_firstmate_git_root "$code"
+  printf 'domain\n' > "$sub/.fm-secondmate-home"
+  printf 'nested\n' > "$child/.fm-secondmate-home"
+  fm_write_secondmate_meta "$home/state/domain.meta" "$sub"
+  fm_write_secondmate_meta "$sub/state/nested.meta" "$child"
+  printf 'code_root=%s\ncode_head=%s\n' "$code" "$(git -C "$code" rev-parse HEAD)" >> "$sub/state/nested.meta"
+  {
+    printf -- '- domain - synthetic (home: %s; scope: test; projects: ; added 2026-01-01)\n' "$sub"
+    printf -- '- nested - synthetic (home: %s; scope: test; projects: ; added 2026-01-01)\n' "$child"
+  } > "$home/data/secondmates.md"
+  fakebin=$(make_fake_tmux "$TMP_ROOT/shared-descendant-fake")
+  log="$TMP_ROOT/shared-descendant-fake/tmux.log"
+  err="$TMP_ROOT/shared-descendant.err"
+  PATH="$fakebin:$PATH" FM_ROOT_OVERRIDE="$code" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" \
+    "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>"$err" || rc=$?
+  [ "$rc" -ne 0 ] || fail 'forced parent retirement removed a shared-code descendant'
+  assert_grep 'shared-code descendant nested cannot be retired' "$err" "descendant retirement must refuse during preflight: $(cat "$err")"
+  assert_present "$sub/state/nested.meta" 'descendant custody must remain recorded'
+  assert_present "$child/.fm-secondmate-home" 'descendant home must remain in place'
+  assert_present "$home/state/domain.meta" 'parent custody must remain recorded'
+  assert_no_regex 'kill-window|kill-session' "$log" 'descendant refusal must precede endpoint deletion'
+  pass 'forced parent retirement cannot bypass shared-code descendant preservation'
+}
+
 test_secondmate_force_teardown_sweeps_nested_homes() {
   local home subhome childhome subhome_abs childhome_abs fakebin log sweep_log
   home="$TMP_ROOT/procevent-force-home"
@@ -3131,6 +3205,7 @@ test_home_seed_rolls_back_failed_clone
 test_home_seed_refuses_missing_filled_charter
 test_home_seed_refuses_placeholder_charter
 test_home_seed_refuses_empty_charter_fields
+test_reseed_preserves_declared_local_shared_code_root
 test_home_seed_no_projects_end_to_end
 test_secondmate_spawn_resolves_punctuated_registry_projects
 test_secondmate_spawn_refuses_ambiguous_and_mismatched_registry_bindings
@@ -3168,6 +3243,8 @@ test_secondmate_teardown_refuses_ambiguous_and_mismatched_registry_bindings
 test_secondmate_teardown_sweeps_process_events_before_removal
 test_secondmate_teardown_refuses_process_events_without_sweep_script
 test_secondmate_teardown_preserves_process_events_on_later_refusal
+test_shared_code_retirement_refuses_even_with_force
+test_forced_parent_retirement_preserves_shared_code_descendant
 test_secondmate_force_teardown_sweeps_nested_homes
 test_secondmate_force_teardown_preserves_nested_restore_status
 test_secondmate_teardown_refuses_failed_leased_home_return

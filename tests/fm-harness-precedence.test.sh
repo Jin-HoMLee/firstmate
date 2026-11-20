@@ -126,6 +126,38 @@ named_bin() {  # <dir> <name>
   printf '%s\n' "$1/$2"
 }
 
+# Source sharing must not turn separate operational-home pins into one global
+# policy. These are resolver inputs only: no named harness is actually launched.
+test_shared_code_reads_each_home_pin_without_copying_source() {
+  local dir fakebin name home crew got
+  dir="$TMP_ROOT/shared-code-four-homes"
+  fakebin=$(blind_ancestry_bin "$dir/blind")
+  mkdir -p "$dir/code/config"
+  printf 'grok\n' > "$dir/code/config/crew-harness"
+  printf 'grok code-decoy low\n' > "$dir/code/config/secondmate-harness"
+  for name in primary career badminton splice; do
+    home="$dir/homes/$name"
+    mkdir -p "$home/config"
+    case "$name" in
+      primary) crew=pi ;;
+      career) crew=codex ;;
+      badminton) crew=claude ;;
+      splice) crew=cursor ;;
+    esac
+    printf '%s\n' "$crew" > "$home/config/crew-harness"
+    printf '%s %s-model high\n' "$crew" "$name" > "$home/config/secondmate-harness"
+    got=$(cd "$dir/code" && under_fake_ps "$fakebin" \
+      FM_HOME="$home" FM_ROOT_OVERRIDE="$dir/code" -- crew)
+    assert_equals "$crew" "$got" "shared code: $name crew pin leaked between homes"
+    got=$(cd "$dir/code" && under_fake_ps "$fakebin" \
+      FM_HOME="$home" FM_ROOT_OVERRIDE="$dir/code" -- secondmate-model)
+    assert_equals "$name-model" "$got" "shared code: $name model pin came from the code root"
+    [ ! -e "$home/bin" ] && [ ! -e "$home/.git" ] \
+      || fail "shared code: pin resolution created another source installation"
+  done
+  pass "one harness resolver reads four independent non-checkout home policies"
+}
+
 # --- 1. A foreign marker never renames a markerless harness -----------------
 
 # codex, opencode, kimi, muse, and agy publish no identity marker, so before
@@ -826,6 +858,7 @@ test_supervision_protocol_follows_corrected_verdict() {
   pass "session start renders the Codex protocol for a Codex primary holding a retained CLAUDECODE"
 }
 
+test_shared_code_reads_each_home_pin_without_copying_source
 test_markerless_ancestry_outranks_foreign_marker
 test_genuine_marker_and_ancestry_agree
 test_cursor_ordering_still_decides_when_ancestry_is_silent

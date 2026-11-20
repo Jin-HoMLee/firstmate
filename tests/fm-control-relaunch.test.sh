@@ -370,6 +370,7 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   local dir out rc gen_before gen_after
   dir=$(new_case same rl1)
   add_ship_task "$dir" rl1 claude
+  printf 'code_root=unrelated-ship-metadata\ncode_head=opaque-ship-note\n' >> "$dir/home/state/rl1.meta"
   gen_before=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl1)
   printf 'busy_gen=%s\n' "$gen_before" >> "$dir/home/state/rl1.meta"
   out=$(run_control "$dir" rl1 relaunch --note "stopped mid-refactor"); rc=$?
@@ -380,6 +381,8 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   [ "$(meta_field "$dir" rl1 worktree)" = "$dir/wt" ] \
     || fail "the worktree must be reused, not reallocated"
   [ "$(meta_field "$dir" rl1 kind)" = ship ] || fail "kind must survive the relaunch"
+  assert_equals unrelated-ship-metadata "$(meta_field "$dir" rl1 code_root)" 'new secondmate fields do not consume unrelated ship metadata'
+  assert_equals opaque-ship-note "$(meta_field "$dir" rl1 code_head)" 'unrelated ship note remains byte-preserved'
   [ "$(meta_field "$dir" rl1 project)" = "$dir/proj" ] || fail "project must survive the relaunch"
   gen_after=$(meta_field "$dir" rl1 busy_gen)
   [ -n "$gen_after" ] && [ "$gen_after" != "$gen_before" ] \
@@ -2220,6 +2223,153 @@ test_journal_records_the_checkpoint_it_proved() {
   pass "fm-control relaunch: the checkpoint records the exact unlanded work it preserved"
 }
 
+# --- explicit local shared-code replacement --------------------------------
+
+add_shared_code_secondmate() {  # <case-dir> <id>
+  local dir=$1 id=$2
+  fm_git_init_commit "$dir/code"
+  mkdir -p "$dir/code/.pi/extensions" "$dir/home/config" "$dir/home/data/$id"
+  printf 'shared code instructions\n' > "$dir/code/AGENTS.md"
+  ln -s "$ROOT/bin" "$dir/code/bin"
+  : > "$dir/code/.pi/extensions/fm-primary-pi-watch.ts"
+  : > "$dir/code/.pi/extensions/fm-primary-turnend-guard.ts"
+  git -C "$dir/code" add -A
+  git -C "$dir/code" commit -qm 'synthetic native binding'
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/"{state,data,config,projects,bin}
+  printf '%s\n' "$id" > "$dir/smhome/.fm-secondmate-home"
+  printf 'retained instructions\n' > "$dir/smhome/AGENTS.md"
+  printf 'standing charter\n' > "$dir/smhome/data/charter.md"
+  printf 'charter pointer\n' > "$dir/home/data/$id/brief.md"
+  printf 'pi\n' > "$dir/home/config/secondmate-harness"
+  printf -- '- %s - synthetic (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$id" "$dir/code" "$dir/smhome" > "$dir/home/data/secondmates.md"
+  {
+    printf 'window=fmses:fm-%s\nendpoint_task_id=%s\n' "$id" "$id"
+    printf 'worktree=%s\nproject=%s\nhome=%s\n' "$dir/smhome" "$dir/smhome" "$dir/smhome"
+    printf 'harness=pi\nkind=secondmate\nmode=secondmate\nyolo=off\nmodel=default\neffort=default\n'
+    printf 'code_root=%s\ncode_head=%s\n' "$dir/code" "$(git -C "$dir/code" rev-parse HEAD)"
+  } > "$dir/home/state/$id.meta"
+  printf 'pi' > "$dir/fake/command"
+  printf 'pi' > "$dir/fake/becomes"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  cat > "$dir/fakebin/pi" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" != --help ] || printf '%s\n' '--session-dir'
+SH
+  chmod +x "$dir/fakebin/pi"
+}
+
+test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding() {
+  local dir out rc head
+  dir=$(new_case shared-code rlshared)
+  add_shared_code_secondmate "$dir" rlshared
+  head=$(git -C "$dir/smhome" rev-parse HEAD)
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlshared relaunch); rc=$?
+  expect_code 0 "$rc" "shared-code replacement should use the existing transaction"$'\n'"$out"
+  assert_equals "$dir/code" "$(meta_field "$dir" rlshared code_root)" 'source binding survives replacement'
+  assert_equals "$dir/smhome" "$(meta_field "$dir" rlshared worktree)" 'old source/home custody stays in place'
+  assert_equals "$head" "$(git -C "$dir/smhome" rev-parse HEAD)" 'replacement does not move retained home history'
+  assert_equals "$dir/code" "$(journal_field "$dir" rlshared code_root)" 'checkpoint includes shared code separately'
+  assert_grep "cd -- '$dir/code' && FM_ROOT_OVERRIDE='$dir/code'" "$dir/fake/literal" 'replacement binds cwd and root together'
+  assert_grep "$dir/code/.pi/extensions/fm-primary-pi-watch.ts" "$dir/fake/literal" 'replacement native wiring comes from shared source'
+  assert_grep "--session-dir '$dir/smhome/data/pi-sessions'" "$dir/fake/literal" 'replacement keeps conversation storage with its operational home'
+  assert_equals 'standing charter' "$(cat "$dir/smhome/data/charter.md")" 'standing charter stays unchanged'
+  pass 'fm-control shared-code replacement preserves the same home/endpoint and rebuilds its native source binding'
+}
+
+test_shared_code_relaunch_refuses_unsupported_profile_before_stop() {
+  local dir out rc before
+  dir=$(new_case shared-code-unsupported rlsharedbad)
+  add_shared_code_secondmate "$dir" rlsharedbad
+  printf 'codex\n' > "$dir/home/config/secondmate-harness"
+  before=$(cat "$dir/home/state/rlsharedbad.meta")
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsharedbad relaunch); rc=$?
+  expect_code 1 "$rc" 'unsupported shared-code replacement must refuse'
+  assert_contains "$out" 'local shared-code launch supports Pi/pi-signed' 'unsupported native axis is explicit'
+  assert_equals pi "$(cat "$dir/fake/command")" 'unsupported replacement does not stop the old agent'
+  assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+  assert_equals "$before" "$(cat "$dir/home/state/rlsharedbad.meta")" 'prior metadata preserved'
+  pass 'fm-control refuses an unsupported shared-code profile before stopping the existing agent'
+}
+
+test_shared_code_relaunch_refuses_unverified_native_storage_before_stop() {
+  local dir variant out rc before
+  for variant in missing-cli-flag unsafe-native-cache; do
+    dir=$(new_case "$variant" rlstorage)
+    add_shared_code_secondmate "$dir" rlstorage
+    case "$variant" in
+      missing-cli-flag) fm_fake_exit0 "$dir/fakebin" pi ;;
+      unsafe-native-cache)
+        mkdir "$dir/smhome/data/pi-sessions"
+        chmod 755 "$dir/smhome/data/pi-sessions" ;;
+    esac
+    before=$(cat "$dir/home/state/rlstorage.meta")
+    out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlstorage relaunch); rc=$?
+    expect_code 1 "$rc" "$variant must refuse before stopping the existing agent"$'\n'"$out"
+    assert_equals pi "$(cat "$dir/fake/command")" 'native storage refusal does not stop the old agent'
+    assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+    assert_equals "$before" "$(cat "$dir/home/state/rlstorage.meta")" 'prior metadata preserved'
+    case "$variant" in
+      missing-cli-flag) [ ! -e "$dir/smhome/data/pi-sessions" ] || fail 'pre-stop check created native storage' ;;
+      unsafe-native-cache) assert_equals 755 "$(fm_pr_file_mode "$dir/smhome/data/pi-sessions")" 'pre-stop check did not change existing permissions' ;;
+    esac
+  done
+  pass 'fm-control refuses unverified CLI/private session storage before stopping an existing shared-code agent'
+}
+
+test_shared_code_relaunch_preserves_unmapped_native_settings_before_stop() {
+  local dir location file before_settings before_meta out rc
+  for location in code smhome; do
+    dir=$(new_case "native-settings-$location" rlsettings)
+    add_shared_code_secondmate "$dir" rlsettings
+    mkdir -p "$dir/$location/.pi"
+    file="$dir/$location/.pi/settings.json"
+    printf '{"shellCommandPrefix":"private-native-sentinel"}\n' > "$file"
+    before_settings=$(git hash-object "$file")
+    before_meta=$(cat "$dir/home/state/rlsettings.meta")
+    out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsettings relaunch); rc=$?
+    expect_code 1 "$rc" 'unmapped native settings must refuse before replacement'
+    assert_contains "$out" 'native configuration mapping is unresolved' 'configuration boundary is explicit'
+    assert_not_contains "$out" private-native-sentinel 'configuration values never appear in refusal'
+    assert_equals pi "$(cat "$dir/fake/command")" 'existing agent remains running'
+    assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+    assert_equals "$before_meta" "$(cat "$dir/home/state/rlsettings.meta")" 'prior launch record preserved'
+    assert_equals "$before_settings" "$(git hash-object "$file")" 'native settings unchanged'
+    [ ! -e "$dir/smhome/data/pi-sessions" ] || fail 'native settings refusal created conversation storage'
+  done
+  pass 'fm-control preserves unmapped home/shared-root native settings and the existing agent before replacement'
+}
+
+test_shared_code_relaunch_refuses_binding_removal_before_stop() {
+  local dir out rc before
+  dir=$(new_case shared-code-removed rlsharedremoved)
+  add_shared_code_secondmate "$dir" rlsharedremoved
+  printf -- '- rlsharedremoved - legacy (home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$dir/smhome" > "$dir/home/data/secondmates.md"
+  before=$(cat "$dir/home/state/rlsharedremoved.meta")
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsharedremoved relaunch); rc=$?
+  expect_code 1 "$rc" 'removing an activated source binding must refuse'
+  assert_contains "$out" 'cannot be removed' 'no implicit downgrade to retained source'
+  assert_equals pi "$(cat "$dir/fake/command")" 'binding mismatch does not stop the old agent'
+  assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+  assert_equals "$before" "$(cat "$dir/home/state/rlsharedremoved.meta")" 'prior metadata preserved'
+  pass 'fm-control refuses a silent shared-code downgrade before stopping the existing agent'
+}
+
+test_shared_code_relaunch_refuses_missing_native_wiring_before_stop() {
+  local dir out rc
+  dir=$(new_case shared-code-missing rlsharedmissing)
+  add_shared_code_secondmate "$dir" rlsharedmissing
+  rm "$dir/code/.pi/extensions/fm-primary-pi-watch.ts"
+  out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" rlsharedmissing relaunch); rc=$?
+  expect_code 1 "$rc" 'missing native wiring must refuse before replacement'
+  assert_contains "$out" 'shared-code primary extension is unavailable' 'missing source binding is explicit'
+  assert_equals pi "$(cat "$dir/fake/command")" 'missing source does not stop the old agent'
+  assert_no_grep /exit "$dir/fake/literal" 'no exit command was sent'
+  pass 'fm-control refuses missing shared native wiring before stopping the existing agent'
+}
+
 # --- secondmate child-work safety -------------------------------------------
 
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter() {
@@ -2775,9 +2925,16 @@ case "${1:-} ${2:-}" in
     fi
     exit 0 ;;
   'pane process-info')
+    # Opt-in external identity change after the new case's pre-stop read.
+    if [ -f "$D/herdr-next-registration" ]; then
+      mv "$D/herdr-next-registration" "$D/herdr-agent-registration"
+    fi
     # A retained registration with a shell-only pane models an exited agent
     # whose Herdr status authority still belongs to its previous session.
-    if [ -f "$D/herdr-agent-registration" ]; then
+    if [ -f "$D/herdr-resume-becomes-live" ] && [ -f "$D/herdr-agent-live" ]; then
+      printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4242,"foreground_processes":[{"pid":4243,"name":"pi","argv":["pi"],"cmdline":"pi"}]}}}\n' \
+        "$(cat "$D/herdr-pane")"
+    elif [ -f "$D/herdr-agent-registration" ]; then
       printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4242,"foreground_processes":[]}}}\n' \
         "$(cat "$D/herdr-pane")"
     else
@@ -2829,7 +2986,14 @@ SH
   chmod +x "$fb/herdr"
   cat > "$fb/ps" <<'SH'
 #!/usr/bin/env bash
-if [ -f "$FM_FAKE_DIR/herdr-agent-registration" ]; then
+if [ -f "$FM_FAKE_DIR/herdr-resume-becomes-live" ] && [ -f "$FM_FAKE_DIR/herdr-agent-live" ]; then
+  case "$*" in
+    '-axo pid=,ppid=,comm=') printf '4242 1 bash\n4243 4242 pi\n' ;;
+    '-p 4242 -o args=') printf 'bash\n' ;;
+    '-p 4243 -o args=') printf 'pi\n' ;;
+    *) exec /bin/ps "$@" ;;
+  esac
+elif [ -f "$FM_FAKE_DIR/herdr-agent-registration" ]; then
   case "$*" in
     '-axo pid=,ppid=,comm=') printf '4242 1 bash\n' ;;
     '-p 4242 -o args=') printf 'bash\n' ;;
@@ -2898,6 +3062,95 @@ herdr_case_or_skip() {  # <name> <id> [session] [surviving-pane]
   add_herdr_ship_task "$HERDR_CASE_DIR" "$2" "${3:-fmlab}" "${4:-%7}"
   make_herdr_stub "$HERDR_CASE_DIR"
   return 0
+}
+
+test_herdr_reference_view_keeps_existing_session_and_refuses_unknown_identity() {
+  local dir id registered paths path out rc command before session_ref session_before agent session_cwd
+  command -v jq >/dev/null 2>&1 || { echo 'skip - retained-home Herdr fixtures need jq'; return 0; }
+  for registered in pi claude missing wrong-cwd changed-after-checkpoint control-ref control-cwd; do
+    id="ref-$registered"
+    dir=$(new_case "$id" "$id")
+    add_shared_code_secondmate "$dir" "$id"
+    # Prepare only this fresh synthetic home; production does no such moves.
+    rm "$dir/code/bin"
+    cp -R "$ROOT/bin" "$dir/code/bin"
+    git -C "$dir/code" add -A
+    git -C "$dir/code" commit -qm 'synthetic retained-native-home source'
+    mkdir -p "$dir/smhome/data/reference-originals" "$dir/smhome/.pi/extensions"
+    paths=$(git -C "$dir/code" ls-tree -r --name-only HEAD -- AGENTS.md README.md CONTRIBUTING.md .tasks.toml bin .pi/extensions)
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      mkdir -p "$(dirname "$dir/smhome/$path")" "$(dirname "$dir/smhome/data/reference-originals/$path")"
+      if [ -e "$dir/smhome/$path" ] || [ -L "$dir/smhome/$path" ]; then
+        mv "$dir/smhome/$path" "$dir/smhome/data/reference-originals/$path"
+      fi
+      ln -s "$dir/code/$path" "$dir/smhome/$path"
+    done <<< "$paths"
+    printf 'private native settings remain at home\n' > "$dir/smhome/.pi/settings.json"
+    # This models first activation from the existing legacy home, not an
+    # implicit migration of a previously recorded shared native cwd.
+    awk '!/^(window|code_root|code_head)=/' "$dir/home/state/$id.meta" > "$dir/next.meta"
+    {
+      printf 'window=fmlab:%%7\nbackend=herdr\nherdr_session=fmlab\n'
+      printf 'herdr_workspace_id=ws1\nherdr_tab_id=tab1\nherdr_pane_id=%%7\n'
+    } >> "$dir/next.meta"
+    mv "$dir/next.meta" "$dir/home/state/$id.meta"
+    make_herdr_stub "$dir"
+    : > "$dir/fake/herdr-resume-becomes-live"
+    printf '%%7' > "$dir/fake/herdr-pane"
+    : > "$dir/fake/herdr-log"
+    session_ref="$dir/smhome/data/original-native.jsonl"
+    session_cwd="$dir/smhome"
+    agent=$registered
+    if [ "$registered" = wrong-cwd ]; then session_cwd="$dir/proj"; agent=pi; fi
+    case "$registered" in changed-after-checkpoint|control-ref|control-cwd) agent=pi ;; esac
+    [ "$registered" != control-cwd ] || session_cwd="${session_cwd}"$'\n'
+    jq -nc --arg cwd "$session_cwd" '{type:"session",id:"kept-native-id",cwd:$cwd}' > "$session_ref"
+    printf '{"type":"message","sentinel":"retained synthetic conversation, not inspected"}\n' >> "$session_ref"
+    session_before=$(git hash-object "$session_ref")
+    if [ "$registered" != missing ]; then
+      printf '{"result":{"agent":{"agent":"%s","agent_status":"idle","agent_session":{"kind":"path","value":"%s"}}}}\n' \
+        "$agent" "$session_ref" > "$dir/fake/herdr-agent-registration"
+    fi
+    if [ "$registered" = control-ref ]; then
+      jq '.result.agent.agent_session.value += "\n"' "$dir/fake/herdr-agent-registration" > "$dir/fake/registration.tmp"
+      mv "$dir/fake/registration.tmp" "$dir/fake/herdr-agent-registration"
+    fi
+    if [ "$registered" = changed-after-checkpoint ]; then
+      cp "$session_ref" "$dir/smhome/data/different-native.jsonl"
+      jq --arg ref "$dir/smhome/data/different-native.jsonl" '.result.agent.agent_session.value = $ref' \
+        "$dir/fake/herdr-agent-registration" > "$dir/fake/herdr-next-registration"
+    fi
+    before=$(git hash-object "$dir/home/state/$id.meta")
+    rc=0
+    out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" "$id" relaunch) || rc=$?
+    if [ "$registered" = pi ]; then
+      expect_code 0 "$rc" "prepared retained-home Herdr replacement should use ordinary same-session resume"$'\n'"$out"
+      command=$(cat "$dir/fake/launched-command")
+      assert_contains "$command" "cd -- '$dir/smhome' && FM_ROOT_OVERRIDE='$dir/code'" 'native home and maintained code remain separate'
+      assert_contains "$command" "--session '$session_ref'" 'existing native identity is resumed'
+      assert_not_contains "$command" --session-dir 'original native storage selection stays unchanged'
+      assert_not_contains "$command" --approve 'project trust is not bypassed'
+      assert_equals "$dir/smhome" "$(meta_field "$dir" "$id" code_native_cwd)" 'native context recorded separately'
+      assert_equals "$dir/smhome" "$(journal_field "$dir" "$id" code_native_cwd)" 'pre-stop transaction includes native context'
+      assert_equals "$session_ref" "$(journal_field "$dir" "$id" code_native_session_ref)" 'transaction pins the pre-stop session reference'
+    elif [ "$registered" = changed-after-checkpoint ]; then
+      expect_code 1 "$rc" 'a changed same-home session after the checkpoint must not be substituted'
+      assert_contains "$out" 'registered Pi session differs from the pre-stop checkpoint' 'identity drift is distinguished from a usable new session'
+      assert_equals "$session_ref" "$(journal_field "$dir" "$id" code_native_session_ref)" 'original session remains recorded in the failed transaction'
+      [ ! -e "$dir/fake/launched-command" ] || fail 'a different same-home session was launched'
+    else
+      expect_code 1 "$rc" 'unverified reference-view native identity must refuse before replacement'
+      assert_contains "$out" 'existing Pi session identity before stopping' 'specific continuity precondition reported'
+      assert_equals "$before" "$(git hash-object "$dir/home/state/$id.meta")" 'refusal leaves original identity record unchanged'
+      [ ! -e "$dir/fake/launched-command" ] || fail 'unknown native identity caused a replacement launch'
+      assert_no_grep 'pane.send-' "$dir/fake/herdr-log" 'identity refusal sends no lifecycle input'
+    fi
+    assert_equals "$session_before" "$(git hash-object "$session_ref")" 'session header and conversation bytes are unchanged'
+    assert_grep 'private native settings remain at home' "$dir/smhome/.pi/settings.json" 'private native settings preserved'
+    assert_grep 'retained instructions' "$dir/smhome/data/reference-originals/AGENTS.md" 'modeled original instructions preserved'
+  done
+  pass 'fm-control retained-home references use the same Herdr Pi session and refuse foreign/missing identity before stopping'
 }
 
 test_herdr_relaunch_resumes_only_the_registered_pi_session() {
@@ -3320,6 +3573,12 @@ test_stop_transport_failure_reconciles_a_dead_agent
 test_complete_journal_failure_rolls_back_from_durable_phase
 test_prepublication_abort_retires_replacement_wiring_and_busy_state
 test_journal_records_the_checkpoint_it_proved
+test_shared_code_relaunch_keeps_custody_and_rebuilds_native_binding
+test_shared_code_relaunch_refuses_unsupported_profile_before_stop
+test_shared_code_relaunch_refuses_unverified_native_storage_before_stop
+test_shared_code_relaunch_preserves_unmapped_native_settings_before_stop
+test_shared_code_relaunch_refuses_binding_removal_before_stop
+test_shared_code_relaunch_refuses_missing_native_wiring_before_stop
 test_secondmate_relaunch_checkpoints_child_work_and_spares_the_charter
 test_secondmate_relaunch_refuses_an_unmarked_home
 test_secondmate_checkpoint_refuses_unreadable_child_state
@@ -3339,6 +3598,7 @@ test_tmux_refuses_a_session_that_cannot_be_found
 test_tmux_refuses_when_the_server_is_gone
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
+test_herdr_reference_view_keeps_existing_session_and_refuses_unknown_identity
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server
 test_herdr_rebind_stays_in_the_recorded_session

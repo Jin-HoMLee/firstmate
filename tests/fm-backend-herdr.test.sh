@@ -689,6 +689,10 @@ test_pane_agent_session_ref_reports_a_resumable_reference_with_its_agent() {
     '{"result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"id","source":"herdr:pi","value":"01a0bdaa-c387-749d-966c-0dcd96a4b755"}}}}')
   [ "$out" = $'pi\t01a0bdaa-c387-749d-966c-0dcd96a4b755' ] \
     || fail "a bare session id must be reported as-is, got '$out'"
+  out=$(pane_agent_session_ref_read \
+    '{"result":{"agent":{"agent":"codex","agent_session":{"kind":"path","value":"/home/u/session with spaces.jsonl"}}}}')
+  [ "$out" = $'codex\t/home/u/session with spaces.jsonl' ] \
+    || fail 'ordinary spaces in a registered path must remain unchanged'
   pass "herdr pane agent session: a resumable reference is reported with the agent label that reported it"
 }
 
@@ -701,6 +705,11 @@ test_pane_agent_session_ref_degrades_to_nothing_when_not_resumable() {
     '{"result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"id","value":"not a token"}}}}' \
     '{"result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"id","value":""}}}}' \
     '{"result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"opaque","value":"whatever"}}}}' \
+    '{"result":{"agent":{"agent":"pi\n","agent_session":{"kind":"path","value":"/abs/session.jsonl"}}}}' \
+    '{"result":{"agent":{"agent":"pi","agent_session":{"kind":"path\n","value":"/abs/session.jsonl"}}}}' \
+    '{"result":{"agent":{"agent":"pi","agent_session":{"kind":"path","value":"/abs/session.jsonl\n"}}}}' \
+    '{"result":{"agent":{"agent":"pi","agent_session":{"kind":"id","value":"session\u0000id"}}}}' \
+    '{"result":{"agent":{"agent":"pi","agent_session":{"kind":"id","value":7}}}}' \
     'not json at all'; do
     out=$(pane_agent_session_ref_read "$body") \
       && fail "an unresumable registration must report nothing resumable, but the read succeeded for: $body"

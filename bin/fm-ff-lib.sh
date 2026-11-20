@@ -365,6 +365,36 @@ live_secondmate_meta_records() {
   done
 }
 
+# Route primary-source writes to the update owner when a local shared binding
+# is recorded or requested. Caller has already proved the target is its own
+# source root. This is not binding/native validation: 0 means use fm-update,
+# 1 means no local shared route, and 2 means routing cannot be read safely.
+fm_shared_source_update_owner_required() {  # <state> <registry>
+  local state=$1 registry=$2 id home window meta root line
+  if { [ -e "$registry" ] || [ -L "$registry" ]; } \
+    && { [ ! -f "$registry" ] || [ -L "$registry" ] || [ ! -r "$registry" ]; }; then
+    return 2
+  fi
+  if [ -f "$registry" ] \
+    && ! secondmate_registry_validate_bindings "$registry" secondmate_registry_path_key; then
+    return 2
+  fi
+  while IFS='|' read -r id home window meta; do
+    if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
+    root=$(secondmate_code_root_from_meta "$meta") || return 2
+    [ -z "$root" ] || return 0
+  done < <(live_secondmate_meta_records "$state" "$registry")
+  if [ -f "$registry" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      secondmate_registry_parse_line "$line" || continue
+      if [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] && [ -n "$SECONDMATE_REGISTRY_ROOT" ]; then
+        return 0
+      fi
+    done < "$registry"
+  fi
+  return 1
+}
+
 # Fast-forward one target to a base. Prints its status line. Sets globals for the
 # caller:
 #   FF_STATUS = updated|current|skipped
@@ -387,10 +417,17 @@ live_secondmate_meta_records() {
 # Guards are identical in both modes: never force/merge/stash; skip a dirty or
 # wrong-branch target and leave its work untouched. An optional secondmate id
 # enables the content-equivalent divergence proof and durable marker described
-# in this file's header.
+# in this file's header. An optional fm_ff_before_advance <dir> <target-commit>
+# hook may refuse before mutation, setting FF_ADVANCE_ERROR for the status line.
+# The resolved commit, not a moving remote ref, is the eventual merge target.
 FF_STATUS=""
 FF_INSTR=""
 FF_IMPORT_FROM=""
+FF_ADVANCE_ERROR=""
+# The update owner pins the shared source's successfully selected commit. Other
+# sweeps leave this empty and resolve their normal caller-supplied base.
+FF_SHARED_CODE_TARGET=""
+
 ff_target() {
   local dir=$1 label=$2 base_mode=$3 allow_detached=${4:-no} ignore_seed_marker=${5:-no}
   local secondmate_id=${6:-} reconciliation_state=${7:-}
@@ -455,7 +492,7 @@ ff_target() {
     echo "$label: skipped: cannot read HEAD"
     return 0
   }
-  base_rev=$(git -C "$dir" rev-parse "$base" 2>/dev/null) || {
+  base_rev=$(git -C "$dir" rev-parse --verify "$base^{commit}" 2>/dev/null) || {
     echo "$label: skipped: cannot read $base"
     return 0
   }
@@ -465,12 +502,18 @@ ff_target() {
     echo "$label: already current"
     return 0
   fi
-  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+  FF_ADVANCE_ERROR=
+  if type fm_ff_before_advance >/dev/null 2>&1 \
+    && ! fm_ff_before_advance "$dir" "$base_rev"; then
+    echo "$label: skipped: ${FF_ADVANCE_ERROR:-update preflight refused}"
+    return 0
+  fi
+  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base_rev" 2>/dev/null; then
     if [ -n "$secondmate_id" ] && [ -n "$reconciliation_state" ] \
       && divergence_is_redundant "$dir" "$local_rev" "$base_rev"; then
-      instr=$(changed_instr "$dir" "$base")
+      instr=$(changed_instr "$dir" "$base_rev")
       before=$(git -C "$dir" rev-parse --short HEAD)
-      if git -C "$dir" reset --keep "$base" >/dev/null 2>&1; then
+      if git -C "$dir" reset --keep "$base_rev" >/dev/null 2>&1; then
         after=$(git -C "$dir" rev-parse --short HEAD)
         FF_STATUS="updated"
         FF_INSTR="$instr"
@@ -498,9 +541,9 @@ ff_target() {
     return 0
   fi
 
-  instr=$(changed_instr "$dir" "$base")
+  instr=$(changed_instr "$dir" "$base_rev")
   before=$(git -C "$dir" rev-parse --short HEAD)
-  if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
+  if ! out=$(git -C "$dir" merge --ff-only "$base_rev" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
     return 0
   fi
@@ -524,7 +567,12 @@ FF_SEEN_HOMES=""
 # Validate and fast-forward one secondmate home, accumulating its stable
 # fm-<id> task selector into FF_NUDGE_WINDOWS when it should be live-converged.
 # Args:
-#   id home window base_mode nudge_requires_instr
+#   id home window base_mode nudge_requires_instr [registry] [metadata]
+# Activated local shared-code homes never receive a Git update. Their
+# code_root/code_head binding is checked against this primary and the selected
+# base. A changed shared code HEAD requires the existing settled/restart owner,
+# not a bootstrap AGENTS-only nudge or a claimed native reload. A declared but
+# not launched binding is skipped; retained legacy source is not an update fallback.
 # A home is nudged only when it ACTUALLY advanced (FF_STATUS=updated) and has a
 # live window. With nudge_requires_instr=yes the advance must also have changed
 # the instruction surface (FF_INSTR non-empty): an already-current home, or one
@@ -547,6 +595,8 @@ FF_SEEN_HOMES=""
 # An undefined hook is simply not called.
 process_secondmate() {
   local id=$1 home=$2 window=${3:-} base_mode=$4 nudge_requires_instr=${5:-no} home_real fm_root_real
+  local registry=${6:-${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md}
+  local meta=${7:-${FM_STATE_OVERRIDE:-$FM_HOME/state}/$1.meta} code_root code_head native_cwd target_head base_ref branch
   [ -n "$id" ] || return 0
   [ -n "$home" ] || return 0
   fm_root_real=$(resolve_path "$FM_ROOT")
@@ -562,7 +612,60 @@ process_secondmate() {
   esac
   FF_SEEN_HOMES="$FF_SEEN_HOMES $home_real"
 
-  ff_target "$home_real" "secondmate $id" "$base_mode" yes yes "$id" "${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+  FF_STATUS=skipped
+  FF_INSTR=
+  code_root=$(secondmate_code_root_from_meta "$meta") || {
+    echo "secondmate $id: skipped: invalid code_root metadata"; return 0;
+  }
+  if ! secondmate_local_code_binding "$registry" "$id" "$home_real" "$FM_ROOT" "$code_root"; then
+    echo "secondmate $id: skipped: ${SECONDMATE_REGISTRY_ERROR:-invalid local code binding}"
+    return 0
+  fi
+  if [ -n "$SECONDMATE_LOCAL_CODE_ROOT" ]; then
+    FF_STATUS=skipped
+    FF_INSTR=
+    if [ -z "$code_root" ]; then
+      echo "secondmate $id: skipped: shared-code binding awaits an explicit launch; retained home untouched"
+      return 0
+    fi
+    code_root=$SECONDMATE_LOCAL_CODE_ROOT
+    native_cwd=$(secondmate_code_native_cwd_from_meta "$meta") || {
+      echo "secondmate $id: skipped: invalid shared-code native cwd metadata"; return 0;
+    }
+    if ! secondmate_shared_code_native_files "$code_root" "$home_real" "$native_cwd" \
+      || ! secondmate_shared_code_launch_supported \
+      "$(awk -F= '$1 == "harness" {print $2}' "$meta")" \
+      "$(awk -F= '$1 == "backend" {v=$2} END {print (v == "" ? "tmux" : v)}' "$meta")" \
+      "$SECONDMATE_SHARED_NATIVE_CWD" "$home_real"; then
+      echo "secondmate $id: skipped: unsupported shared-code native refresh"
+      return 0
+    fi
+    code_head=$(secondmate_code_head_from_meta "$meta") || code_head=
+    if [ -z "$code_head" ] || ! git -C "$code_root" cat-file -e "$code_head^{commit}" 2>/dev/null; then
+      echo "secondmate $id: skipped: shared-code launch HEAD is unavailable"
+      return 0
+    fi
+    base_ref=${FF_SHARED_CODE_TARGET:-$base_mode}
+    if [ "$base_ref" = origin ]; then
+      branch=$(default_branch "$code_root") || return 0
+      base_ref="refs/remotes/origin/$branch"
+    fi
+    target_head=$(git -C "$code_root" rev-parse --verify "$base_ref^{commit}" 2>/dev/null) || return 0
+    if [ "$(git -C "$code_root" rev-parse HEAD)" != "$target_head" ]; then
+      echo "secondmate $id: skipped: shared code is not at the selected update target"
+      return 0
+    fi
+    FF_STATUS=current
+    if [ "$code_head" != "$target_head" ] \
+      && ! type fm_ff_after_secondmate_settled >/dev/null 2>&1; then
+      FF_STATUS=skipped
+      echo "secondmate $id: skipped: shared source changed since launch; use the existing update/restart owner, not an AGENTS-only nudge"
+      return 0
+    fi
+    echo "secondmate $id: shared code current; native refresh belongs to the restart owner; retained home untouched"
+  else
+    ff_target "$home_real" "secondmate $id" "$base_mode" yes yes "$id" "${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+  fi
   if [ -n "$window" ] && { [ "$FF_STATUS" = "updated" ] || [ "$FF_STATUS" = "current" ]; } \
     && type fm_ff_after_secondmate_settled >/dev/null 2>&1; then
     fm_ff_after_secondmate_settled "$id" "$home_real" "$window" "$FF_STATUS" "$FF_INSTR"
@@ -589,6 +692,6 @@ sweep_live_secondmate_metas() {
   [ -d "$state" ] || return 0
   while IFS='|' read -r id home window meta; do
     if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
-    process_secondmate "$id" "$home" "$window" "$base_mode" "$nudge_requires_instr"
+    process_secondmate "$id" "$home" "$window" "$base_mode" "$nudge_requires_instr" "$registry" "$meta"
   done < <(live_secondmate_meta_records "$state" "$registry")
 }

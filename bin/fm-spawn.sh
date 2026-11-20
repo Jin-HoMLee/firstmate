@@ -271,7 +271,8 @@
 #   also adds --approve when that help advertises it, so the first unattended
 #   launch does not stall on Pi's "Trust project folder?" dialog for that home
 #   path; --approve is session-scoped to the launch cwd and does not rewrite the
-#   operator's trust.json. Ordinary Pi worker launches never receive --approve.
+#   operator's trust.json. The retained-home reference view described below
+#   omits this approval. Ordinary Pi worker launches never receive --approve.
 #   A missing selected executable refuses before endpoint creation, and pi-signed
 #   never falls back to pi.
 #   Devin is worker-only: --permission-mode dangerous and
@@ -339,7 +340,21 @@
 #   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 #   see AGENTS.md task lifecycle); --secondmate records kind=secondmate and launches in a
 #   provisioned firstmate home; the default is kind=ship.
-#   Before a secondmate launch, the home is fast-forwarded to the primary's
+#   An explicit LOCAL registry `root:` binding selects the primary's shared
+#   code checkout while keeping `home:`/worktree custody and private directories
+#   unchanged (bin/fm-secondmate-registry-lib.sh owns binding validation).
+#   Supports Pi/pi-signed on tmux, plus Herdr's ordinary same-home resume only
+#   for an already-prepared, complete individual-reference view. Other axes and
+#   raw commands refuse. code_root/code_head record source; code_native_cwd
+#   records context independently. Native primary extensions and FM_ROOT_OVERRIDE
+#   name maintained code. A reference view retains home cwd/settings/trust and
+#   native session storage; Herdr replacement requires its existing session.
+#   The shared-cwd shape remains tmux-only and starts fresh with separate storage.
+#   The old home's tracked source is never synced or converted by this mode;
+#   fm-secondmate-restart.sh still owns pre-replacement open-work persistence.
+#   This is NOT reference provisioning, a primary handoff, preservation proof,
+#   a trust/settings change, or a cross-root session migration.
+#   Before a legacy secondmate launch, the home is fast-forwarded to the primary's
 #   default-branch commit when safe: directly for a local home, or through the
 #   configured host for a remote home. Skipped syncs warn and launch unchanged.
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
@@ -539,11 +554,12 @@
 #     __CLAUDESETTINGS__ the single claude --settings value: a quoted inline
 #                  JSON object for a crewmate or scout, or a quoted path to
 #                  state/<task-id>.claude-settings.json for a secondmate
-#     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
+#     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH,
+#                  plus the private --session-dir argument for shared-cwd launches
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
 #     __PIAPPROVE__ optional --approve on a seeded Pi/pi-signed secondmate when
-#                  that executable advertises the flag (empty otherwise; session
-#                  trust for the launch cwd only, never a trust.json rewrite)
+#                  that executable advertises the flag, except for the retained-home
+#                  reference view above (session trust only, never a trust.json rewrite)
 #     __PIEXCLUDE__ optional ` --exclude-tools '<comma-joined names>'` from
 #                  config/crew-exclude-tools on Pi/pi-signed ship and scout
 #                  launches (supplies its own leading space, empty otherwise)
@@ -555,7 +571,7 @@
 #                  swallow the launch prompt.
 #     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
 #                  Pi replacement on the session the endpoint's runtime already
-#                  reports (relaunch_resume_args below owns it; it supplies its
+#                  reports (the relaunch rendering below owns it; it supplies its
 #                  own leading space, and is empty on every fresh spawn and for
 #                  every other harness)
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
@@ -563,8 +579,9 @@
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi busy-state extension,
 #                  written by this script; outside the worktree to avoid pi's trust gate;
 #                  a secondmate loads it beside its two primary extensions)
-#     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts in a pi secondmate home
-#     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts in a pi secondmate home
+#     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts
+#     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts
+#                  Both use the selected code root: shared root or legacy home.
 #     __OMPBIN__   quoted concrete omp executable path resolved from PATH
 #     __OMPPROFILE__ optional ` --profile '<name>'` from the per-secondmate omp
 #                  profile pin (supplies its own leading space, empty otherwise)
@@ -2451,6 +2468,9 @@ SPAWN_TASK_LOCK_HELD=1
 PROJ=
 ARG3=
 FIRSTMATE_HOME=
+SECONDMATE_CODE_ROOT=
+SECONDMATE_NATIVE_CWD=
+SECONDMATE_PI_SESSION_DIR=
 RAW_LAUNCH=0
 
 # --relaunch adoption: every identity axis comes from the task's own validated
@@ -3407,7 +3427,7 @@ pi | pi-signed)
   if [ "$KIND" = secondmate ] && pi_supports_approve "$PI_BIN"; then
     PI_APPROVE=' --approve'
   fi
-  LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
+  # Resolve the trust flag after the shared-code native view is known.
   PI_EXCLUDE=
   [ -z "$EXCLUDE_TOOLS" ] || PI_EXCLUDE=" --exclude-tools $(shell_quote "$EXCLUDE_TOOLS")"
   LAUNCH=${LAUNCH//__PIEXCLUDE__/$PI_EXCLUDE}
@@ -4174,6 +4194,39 @@ if [ "$KIND" = secondmate ]; then
     fi
     SECONDMATE_PROJECTS=$SECONDMATE_REGISTRY_MATCH_PROJECTS
   fi
+  recorded_code_root=$(secondmate_code_root_from_meta "$STATE/$ID.meta") || {
+    echo "error: invalid secondmate code_root metadata for $ID" >&2
+    exit 1
+  }
+  if ! secondmate_local_code_binding "$DATA/secondmates.md" "$ID" "$PROJ_ABS" "$FM_ROOT" "$recorded_code_root"; then
+    echo "error: ${SECONDMATE_REGISTRY_ERROR:-cannot resolve local shared-code binding for $ID}" >&2
+    exit 1
+  fi
+  SECONDMATE_CODE_ROOT=$SECONDMATE_LOCAL_CODE_ROOT
+  if [ -n "$SECONDMATE_CODE_ROOT" ]; then
+    # The update owner holds this same task lock while publishing shared code.
+    # Relaunch already owns/inherits it; first activation must serialize too,
+    # before validating the view or launching against bytes that can advance.
+    if [ "$SPAWN_CONTROL_PARENT" = 0 ] && [ "$SPAWN_CONTROL_LOCK_HELD" = 0 ]; then
+      SPAWN_CONTROL_LOCK="$STATE/.control-$ID.lock"
+      if ! fm_lock_try_acquire "$SPAWN_CONTROL_LOCK"; then
+        echo "error: shared-code source update or lifecycle action is in progress for $ID" >&2
+        exit 1
+      fi
+      SPAWN_CONTROL_LOCK_HELD=1
+    fi
+    [ "$RAW_LAUNCH" = 0 ] || { echo 'error: shared-code secondmates require a verified runtime, not a raw command' >&2; exit 1; }
+    recorded_native_cwd=$(secondmate_code_native_cwd_from_meta "$STATE/$ID.meta") || {
+      echo 'error: invalid shared-code native cwd metadata' >&2; exit 1;
+    }
+    secondmate_shared_code_native_files "$SECONDMATE_CODE_ROOT" "$PROJ_ABS" "$recorded_native_cwd" || exit 1
+    SECONDMATE_NATIVE_CWD=$SECONDMATE_SHARED_NATIVE_CWD
+    secondmate_shared_code_launch_supported "$HARNESS" "$BACKEND" "$SECONDMATE_NATIVE_CWD" "$PROJ_ABS" || exit 1
+    if [ "$SECONDMATE_NATIVE_CWD" = "$SECONDMATE_CODE_ROOT" ]; then
+      secondmate_shared_code_pi_session_cli "$PI_BIN" || exit 1
+      SECONDMATE_PI_SESSION_DIR=$(secondmate_shared_code_pi_session_dir "$PROJ_ABS" prepare) || exit 1
+    fi
+  fi
   WT="$PROJ_ABS"
   # Local-HEAD sync: before launch, fast-forward this secondmate's worktree to the
   # PRIMARY checkout's current default-branch commit, so a freshly spawned or
@@ -4187,7 +4240,7 @@ if [ "$KIND" = secondmate ]; then
   # already synced the home to ITS primary commit, and $FM_ROOT here is only that
   # host's own Firstmate copy; syncing again would target the wrong checkout, so
   # the caller turns this step off (bin/fm-remote-secondmate-control.sh).
-  if [ "${FM_SKIP_SECONDMATE_SYNC:-0}" = 1 ]; then
+  if [ -n "$SECONDMATE_CODE_ROOT" ] || [ "${FM_SKIP_SECONDMATE_SYNC:-0}" = 1 ]; then
     :
   elif sm_primary_head=$(primary_head_commit "$FM_ROOT"); then
     sm_ff_out=$(ff_target "$PROJ_ABS" "secondmate $ID" "$sm_primary_head" yes yes "$ID" "$STATE" 2>&1 || true)
@@ -7324,10 +7377,11 @@ else
 fi
 SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
-  awk -F= '
+  awk -F= -v task_kind="$KIND" '
     BEGIN {
       split("window endpoint_task_id worktree project harness hermes_profile hermes_home kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
       for (i in keys) owned[keys[i]] = 1
+      if (task_kind == "secondmate") { owned["code_root"] = 1; owned["code_head"] = 1; owned["code_native_cwd"] = 1 }
     }
     !($1 in owned)
   ' "$RELAUNCH_META"
@@ -7428,6 +7482,12 @@ preserve_relaunch_meta() {
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
+    if [ -n "$SECONDMATE_CODE_ROOT" ]; then
+      echo "code_root=$SECONDMATE_CODE_ROOT"
+      shared_code_head=$(git -C "$SECONDMATE_CODE_ROOT" rev-parse --verify HEAD) || exit 1
+      echo "code_head=$shared_code_head"
+      echo "code_native_cwd=$SECONDMATE_NATIVE_CWD"
+    fi
   fi
   if [ "$SPAWN_CONTROL_PARENT" = 1 ] && [ -n "${FM_CONTROL_RELAUNCH_TX:-}" ]; then
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
@@ -7535,8 +7595,8 @@ fi
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
 sq_piext=$(shell_quote "$STATE/$ID.pi-ext.ts")
-sq_piturnend=$(shell_quote "$PROJ_ABS/.pi/extensions/fm-primary-turnend-guard.ts")
-sq_piwatch=$(shell_quote "$PROJ_ABS/.pi/extensions/fm-primary-pi-watch.ts")
+sq_piturnend=$(shell_quote "${SECONDMATE_CODE_ROOT:-$PROJ_ABS}/.pi/extensions/fm-primary-turnend-guard.ts")
+sq_piwatch=$(shell_quote "${SECONDMATE_CODE_ROOT:-$PROJ_ABS}/.pi/extensions/fm-primary-pi-watch.ts")
 sq_ompext=$(shell_quote "$STATE/$ID.omp-ext.ts")
 sq_ompcfg=$(shell_quote "${OMP_WORKER_CFG:-$FM_ROOT/.omp/fm-worker-overlay.yml}")
 sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
@@ -7551,8 +7611,20 @@ LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
 # known, and substituted only into the Pi-family template's `__PIRESUME__`
 # placeholder; an empty value leaves every other launch byte-identical.
 RESUME_ARGS=
-if [ "$RELAUNCH" -eq 1 ]; then
-  RESUME_ARGS=$(relaunch_resume_args "$HARNESS" "$BACKEND" "$T") || RESUME_ARGS=
+if [ "$RELAUNCH" -eq 1 ] && { [ -z "$SECONDMATE_CODE_ROOT" ] || [ "$SECONDMATE_NATIVE_CWD" = "$PROJ_ABS" ]; }; then
+  if [ -n "$SECONDMATE_CODE_ROOT" ] && [ "$BACKEND" = herdr ]; then
+    shared_resume_identity=$(secondmate_shared_code_resume_identity "$HARNESS" "$T" "$PROJ_ABS") || {
+      echo 'error: retained-home shared-code relaunch cannot prove its existing Pi session identity' >&2; exit 1;
+    }
+    shared_session_ref=${shared_resume_identity#*$'\t'}
+    if [ "$SPAWN_CONTROL_PARENT" = 1 ] && [ "$shared_session_ref" != "${FM_CONTROL_NATIVE_SESSION_REF:-}" ]; then
+      echo 'error: registered Pi session differs from the pre-stop checkpoint; refusing replacement' >&2; exit 1
+    fi
+    # Render the one verified registration, not a second potentially changed read.
+    RESUME_ARGS=" --session $(shell_quote "$shared_session_ref")"
+  else
+    RESUME_ARGS=$(relaunch_resume_args "$HARNESS" "$BACKEND" "$T") || RESUME_ARGS=
+  fi
 fi
 LAUNCH=${LAUNCH//__PIRESUME__/$RESUME_ARGS}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
@@ -7591,7 +7663,16 @@ LAUNCH=${LAUNCH//__OMPEXT__/$sq_ompext}
 LAUNCH=${LAUNCH//__OMPWORKERCFG__/$sq_ompcfg}
 LAUNCH=${LAUNCH//__OPINPUT__/$sq_opinput}
 case "$HARNESS" in
-pi | pi-signed) LAUNCH=${LAUNCH//__PIBIN__/"$(shell_quote "$PI_BIN")"} ;;
+pi | pi-signed)
+  PI_COMMAND=$(shell_quote "$PI_BIN")
+  if [ -n "$SECONDMATE_PI_SESSION_DIR" ]; then
+    PI_COMMAND="$PI_COMMAND --session-dir $(shell_quote "$SECONDMATE_PI_SESSION_DIR")"
+  fi
+  if [ -n "$SECONDMATE_CODE_ROOT" ] && [ "$SECONDMATE_NATIVE_CWD" = "$PROJ_ABS" ]; then
+    PI_APPROVE=  # Preserve the retained project's native trust decision.
+  fi
+  LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
+  LAUNCH=${LAUNCH//__PIBIN__/"$PI_COMMAND"} ;;
 cursor) LAUNCH=${LAUNCH//__CURSORBIN__/"$(shell_quote "$CURSOR_BIN")"} ;;
 gemini) LAUNCH=${LAUNCH//__GEMINISETTINGS__/"$(shell_quote "$STATE_REAL/$ID.gemini-settings.json")"} ;;
 omp)
@@ -7736,7 +7817,12 @@ if [ "$KIND" = secondmate ]; then
   # not enable them across the launch boundary (bin/fm-trace-context-lib.sh header).
   # Reuse the single frozen decision from the carrier resolution above so the
   # injected carrier and this on/off snapshot are guaranteed to agree.
-  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
+  sq_code_root=
+  [ -z "$SECONDMATE_CODE_ROOT" ] || sq_code_root=$(shell_quote "$SECONDMATE_CODE_ROOT")
+  LAUNCH="FM_ROOT_OVERRIDE=$sq_code_root FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
+  if [ -n "$SECONDMATE_CODE_ROOT" ]; then
+    LAUNCH="cd -- $(shell_quote "$SECONDMATE_NATIVE_CWD") && $LAUNCH"
+  fi
 else
   # A ship or scout works for the active home itself.
   LAUNCH="export FM_HOME=$(shell_quote "$FM_HOME"); $LAUNCH"

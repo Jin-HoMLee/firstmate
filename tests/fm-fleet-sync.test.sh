@@ -747,6 +747,96 @@ test_non_signature_fetch_failure_is_not_retried() {
   pass "a non-packed-refs.lock fetch failure keeps today's behavior (no retry)"
 }
 
+test_shared_primary_source_uses_the_update_owner() {
+  local kind home code work state data old out ordinary registry_before
+  for kind in recorded declared unsafe missing-date truncated prose remote legacy; do
+    home="$TMP_ROOT/source-owner-$kind"
+    state="$home/routing-state"
+    data="$home/routing-data"
+    mkdir -p "$state" "$data" "$home/consumer" "$home/projects"
+    code=$(build_enclosing_home "source-owner-$kind")
+    work="$(dirname "$code")/work"
+    # Fresh, committed command doubles keep this a Git/route test, not a
+    # real primary startup, native-resource load or delivery-mode operation.
+    mkdir -p "$work/bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/fm-guard.sh"
+    printf '#!/usr/bin/env bash\nprintf "no-mistakes no\\n"\n' > "$work/bin/fm-project-mode.sh"
+    chmod +x "$work/bin/fm-guard.sh" "$work/bin/fm-project-mode.sh"
+    git -C "$work" add bin
+    git -C "$work" commit -qm 'synthetic source-owner commands'
+    git -C "$work" push -q origin main
+    git -C "$code" pull -q --ff-only
+    old=$(head_sha "$code")
+    printf 'private original\n' > "$home/consumer/private.txt"
+    ln -s "$code/AGENTS.md" "$home/consumer/source-note"
+    case "$kind" in
+      recorded)
+        printf 'kind=secondmate\nhome=%s\ncode_root=%s\n' "$home/consumer" "$code" > "$state/mate.meta"
+        ;;
+      declared)
+        printf -- '- mate - fixture (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+          "$code" "$home/consumer" > "$data/secondmates.md"
+        ;;
+      unsafe) ln -s "$data/nonexistent" "$data/secondmates.md" ;;
+      missing-date)
+        printf -- '- mate - fixture (root: %s; home: %s; scope: test; projects: none)\n' \
+          "$code" "$home/consumer" > "$data/secondmates.md"
+        ;;
+      truncated) printf -- '- mate\n' > "$data/secondmates.md" ;;
+      prose) printf '# Secondmates\n\nNo entries have been registered.\n' > "$data/secondmates.md" ;;
+      remote)
+        printf 'kind=secondmate\nhome=%s\ncode_root=%s\nremote_host=example.invalid\n' \
+          "$home/consumer" "$code" > "$state/mate.meta"
+        ;;
+    esac
+    registry_before=
+    if [ -f "$data/secondmates.md" ] && [ ! -L "$data/secondmates.md" ]; then
+      registry_before=$(git hash-object "$data/secondmates.md")
+    fi
+    commit_file "$work" AGENTS.md v2 'synthetic source advance'
+    git -C "$work" push -q origin main
+    out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$code" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" \
+      "$ROOT/bin/fm-fleet-sync.sh" "$code" 2>/dev/null)
+    if [ "$kind" = legacy ] || [ "$kind" = remote ] || [ "$kind" = prose ]; then
+      assert_equals "$(head_sha "$work")" "$(head_sha "$code")" "$kind self-source project refresh retains its existing behavior"
+    elif [ "$kind" = unsafe ] || [ "$kind" = missing-date ] || [ "$kind" = truncated ]; then
+      assert_equals "$old" "$(head_sha "$code")" "$kind registry cannot certify no shared-source routing"
+      assert_contains "$out" 'shared-code source routing cannot be read safely' "$kind routing is not guessed"
+      if [ "$kind" = unsafe ]; then
+        assert_equals "$data/nonexistent" "$(readlink "$data/secondmates.md")" 'unsafe registry pointer stays unchanged'
+      else
+        assert_absent "$state/mate.meta" "$kind inventory refusal cannot activate a consumer"
+      fi
+      assert_equals "$code/AGENTS.md" "$(readlink "$home/consumer/source-note")" "$kind refusal preserves the reference"
+      assert_equals 'private original' "$(cat "$home/consumer/private.txt")" "$kind refusal preserves private content"
+    else
+      assert_equals "$old" "$(head_sha "$code")" "$kind shared source must not advance through project refresh"
+      assert_contains "$out" 'shared-code source requires bin/fm-update.sh' "$kind route names its existing update owner"
+      assert_equals "$code/AGENTS.md" "$(readlink "$home/consumer/source-note")" "$kind refusal preserves the reference"
+      assert_grep 'private original' "$home/consumer/private.txt" "$kind refusal preserves private content"
+      if [ "$kind" = recorded ]; then
+        printf 'mate\n' > "$home/consumer/.fm-secondmate-home"
+        mkdir -p "$home/consumer/state" "$home/consumer/data"
+        out=$(FM_HOME="$home/consumer" FM_ROOT_OVERRIDE="$code" \
+          FM_STATE_OVERRIDE="$home/consumer/state" FM_DATA_OVERRIDE="$home/consumer/data" \
+          "$ROOT/bin/fm-fleet-sync.sh" "$code" 2>/dev/null)
+        assert_equals "$old" "$(head_sha "$code")" 'a child cannot bypass the source owner through its empty private registry'
+        assert_contains "$out" 'shared-code source update belongs to the owning primary' 'child project refresh names the actual owner'
+      fi
+    fi
+    if [ -n "$registry_before" ]; then
+      assert_equals "$registry_before" "$(git hash-object "$data/secondmates.md")" "$kind registry bytes remain unchanged"
+    fi
+    ordinary=$(build_pair "$home" "ordinary-$kind")
+    advance_origin "$home" "ordinary-$kind" C1
+    out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$code" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" \
+      "$ROOT/bin/fm-fleet-sync.sh" "$ordinary" 2>/dev/null)
+    assert_equals "$(head_sha "$home/work-ordinary-$kind")" "$(head_sha "$ordinary")" 'an ordinary project is not mistaken for maintained source'
+  done
+  pass 'project refresh routes activated or declared shared primary source to its update owner without changing legacy or ordinary-project refresh'
+}
+
+test_shared_primary_source_uses_the_update_owner
 test_detached_clean_ancestor_recovers
 test_detached_unique_commit_is_stuck_untouched
 test_detached_clean_ancestor_with_diverged_local_default_is_stuck_untouched

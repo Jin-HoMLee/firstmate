@@ -83,6 +83,7 @@ A relaunch does take one session reference when the endpoint's own runtime recor
    A Claude or Pi replacement must also pass the home's [worker account pin](configuration.md#worker-account-pin-configclaude-account-configpi-account), or a secondmate's own [per-secondmate account pin](configuration.md#per-secondmate-account-pins) when one is set, so a pin that no longer resolves or is signed out refuses before the old agent stops.
    Under a declared [Claude account list](configuration.md#several-claude-accounts-configclaude-accounts), a Claude ship or scout keeps its recorded account, and `--account <entry>` moves it to another declared one after the same check.
    An omp secondmate replacement likewise passes its [per-secondmate omp profile](configuration.md#per-secondmate-omp-profile) file check before the old agent stops.
+   An explicit local shared-code replacement also follows its [binding-specific pre-stop contract](configuration.md#local-shared-code-binding).
    Ship and scout replacements also pass the [worker tool exclusion checks](configuration.md#worker-tool-exclusions-configcrew-exclude-tools) at this step.
 2. **Safe checkpoint.**
    The recorded worktree must exist and be a worktree root; its head and dirty state are recorded.
@@ -95,7 +96,8 @@ A relaunch does take one session reference when the endpoint's own runtime recor
 5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which reuses the recorded worktree instead of creating one, adopts the recorded endpoint when it still exists, clears the previous harness's per-task wiring, and arms a fresh busy generation.
    When the recorded endpoint is proven gone rather than merely idle or unreachable - which only Herdr and Rex can establish - the launch owner creates one fresh endpoint in that same worktree and the republished record rebinds the task to it - see [Reclaiming a task whose endpoint is gone](#reclaiming-a-task-whose-endpoint-is-gone).
 6. **Preserve runtime-bound status authority where supported.**
-   The endpoint's runtime may bind pane status to one session identity; the launch owner preserves it only when that runtime records a reference the replacement adapter can consume, and otherwise launches the ordinary fresh session.
+   The endpoint's runtime may bind pane status to one session identity; for legacy targets, the launch owner preserves it only when that runtime records a reference the replacement adapter can consume, and otherwise launches the ordinary fresh session.
+   Explicit local shared-code targets follow the [configuration owner's continuity requirement](configuration.md#local-shared-code-binding) instead.
    This reference is a launch input, never authority to send, close, or act on the pane.
    [`docs/herdr-backend.md`](herdr-backend.md#agent-status-authority-and-relaunch) owns the mechanism and measured behavior.
 

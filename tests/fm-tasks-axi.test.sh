@@ -66,6 +66,58 @@ bootstrap_backlog_lines() {  # <code-root> [<home>]
   fi
 }
 
+# One executable must keep four independent homes separate even when they reuse
+# a task id. The CLI shim performs a real rename write without any installed
+# tasks-axi, account, service, bootstrap, or native worker being required.
+test_shared_code_keeps_four_home_backlogs_separate() {
+  local dir name other home out fakebin
+  dir="$TMP_ROOT/shared-code-four-homes"
+  fakebin="$dir/fakebin"
+  mkdir -p "$fakebin" "$dir/code/data"
+  fm_test_tasks_toml "$dir/code/.tasks.toml"
+  printf 'CODE-ROOT-BACKLOG-MUST-NOT-CHANGE\n' > "$dir/code/data/backlog.md"
+  cp "$dir/code/data/backlog.md" "$dir/code.expected"
+  cat > "$fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "$#" -eq 3 ] && [ "$1" = add ] || exit 64
+[ "$PWD/data/backlog.md" = "$TASKS_AXI_FILE" ] || exit 65
+next="$TASKS_AXI_FILE.$$.next"
+cp "$TASKS_AXI_FILE" "$next"
+printf -- '- [ ] %s: %s\n' "$2" "$3" >> "$next"
+mv "$next" "$TASKS_AXI_FILE"
+printf '%s\n' "$PWD"
+SH
+  chmod +x "$fakebin/tasks-axi"
+  for name in primary career badminton splice; do
+    home="$dir/homes/$name"
+    mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
+    fm_test_tasks_toml "$home/.tasks.toml"
+    empty_backlog "$home/data/backlog.md"
+    cp "$home/data/backlog.md" "$home/expected.md"
+    printf '%s-private\n' "$name" > "$home/config/domain-note"
+  done
+  for name in primary career badminton splice; do
+    home="$dir/homes/$name"
+    out=$(cd "$dir/code" && PATH="$fakebin:$BASE_PATH" FM_HOME="$home" \
+      FM_ROOT_OVERRIDE="$dir/code" TASKS_AXI_FILE="$dir/code/data/backlog.md" \
+      "$WRAPPER" add same-task "$name-only") || fail "shared code: $name write failed"
+    assert_equals "$home" "$out" "shared code: CLI entered another home's directory"
+    printf -- '- [ ] same-task: %s-only\n' "$name" >> "$home/expected.md"
+    for other in primary career badminton splice; do
+      cmp -s "$dir/homes/$other/expected.md" "$dir/homes/$other/data/backlog.md" \
+        || fail "shared code: $name write changed $other unexpectedly"
+      assert_equals "$other-private" "$(cat "$dir/homes/$other/config/domain-note")" \
+        "shared code: a home's private configuration changed"
+      [ ! -e "$dir/homes/$other/bin" ] && [ ! -e "$dir/homes/$other/.git" ] \
+        || fail "shared code: a private home acquired another installation"
+    done
+    cmp -s "$dir/code.expected" "$dir/code/data/backlog.md" \
+      || fail "shared code: a write reached the code-root backlog"
+  done
+  pass "one tasks wrapper keeps four non-checkout homes and equal task ids separate across rename writes"
+}
+
 test_guard_reports_regular_code_root_backlog() {
   local dir out
   dir=$(make_split guard-regular)
@@ -239,6 +291,7 @@ test_wrapper_single_home() {
   pass "fm-tasks-axi.sh keeps the single-home layout addressing its own code-root backlog"
 }
 
+test_shared_code_keeps_four_home_backlogs_separate
 test_guard_reports_regular_code_root_backlog
 test_guard_reports_foreign_link_and_archive
 test_guard_silent_for_single_home

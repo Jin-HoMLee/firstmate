@@ -22,6 +22,14 @@ A local route uses:
 - <id> - <one-sentence charter summary> (home: <absolute-home-path>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
+An explicitly bound local shared-code route uses:
+
+```markdown
+- <id> - <one-sentence charter summary> (root: <absolute-primary-code-root>; home: <absolute-existing-home>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
+```
+
+[`Local shared-code binding`](../../../docs/configuration.md#local-shared-code-binding) owns its limited runtime support, prepared individual-reference view, activation/recovery boundary, preservation requirements, and unsupported primary/cross-root handoffs.
+
 A whole-home remote route uses:
 
 ```markdown
@@ -87,9 +95,10 @@ It also writes the gitignored `.fm-secondmate-parent` durable binding before the
 Select the registered mate's id when resolving its pin; [`bin/fm-harness.sh`](../../../bin/fm-harness.sh)'s header owns the resolver commands.
 
 This section is the single owner of the secondmate sync and inherited-local-material propagation contract; `AGENTS.md` sections 3 and 4 point here.
-Before a local launch, `fm-spawn.sh --secondmate` locally fast-forwards the home to the primary firstmate checkout's current default-branch commit when it is safe, or reconciles a clean divergence whose complete local result is already present there (e.g. after a squash merge) with `reset --keep`; dirty, uniquely diverged, or in-flight homes launch unchanged with a warning, and a genuine divergence gets the same durable reconciliation record `bin/fm-ff-lib.sh` writes for `/updatefirstmate`.
+For explicit local shared-code routes, follow the [configuration owner](../../../docs/configuration.md#local-shared-code-binding) instead of the legacy tracked-file sync below.
+Before a legacy local launch, `fm-spawn.sh --secondmate` locally fast-forwards the home to the primary firstmate checkout's current default-branch commit when it is safe, or reconciles a clean divergence whose complete local result is already present there (e.g. after a squash merge) with `reset --keep`; dirty, uniquely diverged, or in-flight homes launch unchanged with a warning, and a genuine divergence gets the same durable reconciliation record `bin/fm-ff-lib.sh` writes for `/updatefirstmate`.
 The locked session-start deferred network stage runs the same bootstrap sweep for every live local secondmate home, discovered from `state/<id>.meta` records with `kind=secondmate` (`data/secondmates.md` only backfills `home=` for older records).
-That no-fetch path is a purely local fast-forward or redundant-divergence reconcile of tracked files, never an origin fetch, and it never touches the gitignored operational dirs, so a secondmate's backlog, projects, and in-flight work are never disturbed; a linked worktree advances immediately, while a standalone clone that lacks the target receives firstmate updates through `/updatefirstmate`.
+For legacy local homes, that no-fetch path is a purely local fast-forward or redundant-divergence reconcile of tracked files, never an origin fetch, and it never touches the gitignored operational dirs, so a secondmate's backlog, projects, and in-flight work are never disturbed; a linked worktree advances immediately, while a standalone clone that lacks the target receives firstmate updates through `/updatefirstmate`.
 A remote launch and the deferred bootstrap sweep hand the configured host the primary's own default-branch commit and ask it to fast-forward, or reconcile a redundant divergence, the persistent home to exactly that commit, under the same clean, ancestry, and branch guards a local home gets.
 A remote home is a standalone clone on another machine, so that host imports the one commit it was given - already present, else from that host's own Firstmate copy without moving it, else from the home's origin - and skips with an actionable reason when none of them holds it, which is what an unpushed primary commit looks like from there.
 Neither path moves the host's Firstmate copy, and the host-local launch never re-targets that copy after the parent has already synced the home.
@@ -122,7 +131,8 @@ Never copy any secondmate `data/captain-shared.md` back into the primary.
 Keep each home's `data/captain.md` domain-local.
 After first propagation to an existing home, trim that home's local `data/captain.md` by hand to domain-specific content plus pointers to `data/captain-shared.md`; do not automate or silently delete private content.
 Keep every `data/learnings.md` fully local by captain decision; route fleet-general machinery facts into tracked documentation through the normal firstmate repo path rather than inventing shared learnings propagation.
-No AGENTS.md reread nudge is needed at spawn or respawn because the agent reads instructions fresh on launch; only the bootstrap sweep's running-home instruction-surface advance needs that AGENTS.md re-read.
+No AGENTS.md reread nudge is needed at spawn or respawn because the agent reads instructions fresh on launch; the bootstrap sweep's legacy-local or remote running-home instruction-surface advance needs that AGENTS.md re-read.
+Shared-code refresh follows its [configuration contract](../../../docs/configuration.md#local-shared-code-binding), not this legacy tracked-instruction nudge.
 Bootstrap reports successful AGENTS.md re-read sends as `BOOTSTRAP_INFO:` and only emits `NUDGE_SECONDMATES:` when that send fails and needs retry.
 A separate, literal-content config reread is required whenever inherited `config/*` material changes under an already-running secondmate.
 For a local home, after each successful allowlisted config write, both the locked bootstrap convergence path and mid-session `bin/fm-config-push.sh` use the shared propagation report to build one per-home generation-specific private instruction file from the validated destination post-write bytes for only the declared config items that actually changed for that home, in declaration order.
@@ -241,6 +251,7 @@ It never initiates a survey or audit during recovery.
 A secondmate is persistent by default.
 An empty queue is healthy and does not trigger teardown.
 Run `bin/fm-teardown.sh <id>` for `kind=secondmate` only when the captain or main firstmate explicitly decides to retire that persistent second mate.
+For local shared-code homes, the [configuration owner's retirement restriction](../../../docs/configuration.md#local-shared-code-binding) takes precedence over the legacy removal procedure below.
 
 The safety check is the secondmate's own home.
 Teardown refuses while its `state/*.meta` contains in-flight work.
