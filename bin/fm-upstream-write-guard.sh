@@ -257,7 +257,8 @@ parse_top_sub_and_target() {
 }
 
 classify_gh() {
-  local tool=$1 arg subsub method=GET method_explicit=0 expect_method=0 has_fields=0 query='' query_seen=0 expect_value=0 org_repo_create=0 api_endpoint
+  local tool=$1 arg subsub method=GET method_explicit=0 has_fields=0 query='' query_seen=0 expect_value=0 org_repo_create=0 api_endpoint api_host api_path
+  local expect_api_value='' field='' has_input=0
   shift
   MUTATION=0
   REPO_SCOPED=0
@@ -333,34 +334,58 @@ classify_gh() {
       ;;
     api)
       [ -n "$TARGET" ] && REPO_SCOPED=1
+      api_endpoint=$(lower "$SUB")
+      case "$api_endpoint" in
+        http://*|https://*)
+          api_host=${api_endpoint#*://}
+          api_path=/${api_host#*/}
+          api_host=${api_host%%/*}
+          api_host=${api_host##*@}
+          api_host=${api_host%%:*}
+          [ "$api_host" != api.github.com ] || api_endpoint=$api_path
+          ;;
+      esac
+      api_endpoint=${api_endpoint%%\?*}
+      api_endpoint=${api_endpoint%%\#*}
+      case "$api_endpoint" in graphql|/graphql) SUB=graphql ;; esac
       for arg in "$@"; do
-        if [ "$expect_method" -eq 1 ]; then
-          method=$arg
-          expect_method=0
-          continue
+        field=''
+        if [ -n "$expect_api_value" ]; then
+          case "$expect_api_value" in
+            method) method=$arg ;;
+            field) field=$arg ;;
+          esac
+          expect_api_value=''
+        else
+          api_endpoint=$(lower "$arg")
+          api_endpoint=${api_endpoint%%\?*}
+          api_endpoint=${api_endpoint%%\#*}
+          case "$api_endpoint" in
+            /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
+            orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
+          esac
+          case "$arg" in
+            --) break ;;
+            -X|--method) expect_api_value=method; method_explicit=1 ;;
+            -X=*|--method=*) method=${arg#*=}; method_explicit=1 ;;
+            -X?*) method=${arg#-X}; method_explicit=1 ;;
+            -f|-F|--field|--raw-field) has_fields=1; expect_api_value=field ;;
+            -f=*|-F=*|--field=*|--raw-field=*) has_fields=1; field=${arg#*=} ;;
+            -f?*|-F?*) has_fields=1; field=${arg#??} ;;
+            --input) has_fields=1; has_input=1; expect_api_value=other ;;
+            --input=*) has_fields=1; has_input=1 ;;
+            -H|--header|-q|--jq|-t|--template|--hostname|--cache|-p|--preview) expect_api_value=other ;;
+          esac
         fi
-        api_endpoint=$(lower "$arg")
-        api_endpoint=${api_endpoint%%\?*}
-        api_endpoint=${api_endpoint%%\#*}
-        case "$api_endpoint" in
-          /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
-          orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
-        esac
-        case "$arg" in
-          -X|--method) expect_method=1; method_explicit=1 ;;
-          -X=*|--method=*) method=${arg#*=}; method_explicit=1 ;;
-          -X?*) method=${arg#-X}; method_explicit=1 ;;
-          -f|--field|-F|--raw-field|--input) has_fields=1 ;;
-          -f=*|--field=*|-F=*|--raw-field=*|--input=*) has_fields=1 ;;
-          -f?*|-F?*) has_fields=1 ;;
-          query=*) query=${arg#query=}; case "$query" in @*) query_seen=0 ;; *) query_seen=1 ;; esac ;;
+        case "$field" in
+          query=*) query=${field#query=}; case "$query" in @*) query_seen=0 ;; *) query_seen=1 ;; esac ;;
         esac
       done
       if [ "$method_explicit" -eq 0 ] && [ "$has_fields" -eq 1 ]; then method=POST; fi
-      if [ "$expect_method" -eq 1 ]; then method=EXPECT; fi
+      if [ "$expect_api_value" = method ]; then method=EXPECT; fi
       method=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
       if [ "$SUB" = graphql ]; then
-        if [ "$query_seen" -eq 1 ]; then
+        if [ "$query_seen" -eq 1 ] && [ "$has_input" -eq 0 ]; then
           case "$query" in *mutation*) MUTATION=1 ;; *) MUTATION=0 ;; esac
         else
           MUTATION=1

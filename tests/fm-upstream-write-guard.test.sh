@@ -113,6 +113,64 @@ expect_allowed gh-axi api POST graphql -f "$query"
 expect_refused gh-axi api POST /repos/kunchenguid/dotfiles/issues -f title=test
 pass "API option values do not hide GraphQL endpoints or change permitted reads and fork writes"
 
+for endpoint in graphql /graphql https://api.github.com/graphql \
+  'https://API.GITHUB.COM:443/graphql?test=1' http://api.github.com/graphql; do
+  for tool in gh gh-axi; do
+    expect_refused "$tool" api --method POST "$endpoint" -f "$mutation"
+    expect_allowed "$tool" api --method POST "$endpoint" -f "$query"
+  done
+  expect_refused gh-axi api POST "$endpoint" -f "$mutation"
+  expect_allowed gh-axi api POST "$endpoint" -f "$query"
+done
+pass "equivalent GraphQL destinations preserve mutation refusal and permitted reads"
+
+for tool in gh gh-axi; do
+  for option in -f -F --field --raw-field; do
+    expect_refused "$tool" api graphql "$option" "$mutation"
+    expect_allowed "$tool" api graphql "$option" "$query"
+    expect_refused "$tool" api graphql "$option=$mutation"
+    expect_allowed "$tool" api graphql "$option=$query"
+  done
+  expect_refused "$tool" api graphql "-f$mutation"
+  expect_refused "$tool" api graphql "-F$mutation"
+  expect_allowed "$tool" api graphql "-f$query"
+  expect_allowed "$tool" api graphql "-F$query"
+  for option in --template --header --jq --cache --preview --hostname; do
+    expect_refused "$tool" api graphql -f "$mutation" "$option" 'query=sent'
+    expect_refused "$tool" api graphql "$option" 'query=sent' -f "$mutation"
+    expect_allowed "$tool" api graphql -f "$query" "$option" "$mutation"
+  done
+  expect_refused "$tool" api graphql --template='query=sent'
+  expect_refused "$tool" api graphql --raw-field=query=@synthetic-not-opened.graphql
+  expect_allowed "$tool" api graphql --raw-field='query={viewer{login}}' --template=plain
+  expect_allowed "$tool" api graphql --template --input --raw-field="$query"
+done
+pass "only owning query-field options establish payloads across separate and attached forms"
+
+input_body="$TMP_ROOT/graphql-input.json"
+printf '%s\n' '{"query":"mutation { addComment(input:{subjectId:\"protected-PR-node-id\",body:\"text\"}) { clientMutationId } }"}' >"$input_body"
+for tool in gh gh-axi; do
+  for endpoint in graphql /graphql https://api.github.com/graphql; do
+    expect_refused "$tool" api "$endpoint" --input "$input_body" --template 'query=sent'
+    expect_refused "$tool" api "$endpoint" --template 'query=sent' --input="$input_body"
+    expect_refused "$tool" api "$endpoint" --input "$input_body" --raw-field="$query"
+    expect_refused "$tool" api "$endpoint" --raw-field="$query" --input "$input_body"
+    expect_refused "$tool" api "$endpoint" --input "$TMP_ROOT/nonexistent-input.json" --template 'query=sent'
+  done
+done
+pass "unverified GraphQL input bodies remain refused without inspecting their contents"
+
+for endpoint in graphql /graphql https://api.github.com/graphql; do
+  policy_graphql_write=$(node "$POLICY" --root "$ROOT" --command "gh api --method POST $endpoint -f '$mutation'")
+  case "$policy_graphql_write" in
+    deny*) ;;
+    *) fail "primary shell policy allowed a GraphQL mutation through $endpoint: $policy_graphql_write" ;;
+  esac
+  policy_graphql_read=$(node "$POLICY" --root "$ROOT" --command "gh api $endpoint --raw-field='$query' --template '$mutation'")
+  [ "$policy_graphql_read" = allow ] || fail "primary shell policy blocked an attached GraphQL read: $policy_graphql_read"
+done
+pass "primary shell policy shares endpoint and query-option classification"
+
 parent_shims=$SHIMS
 child_shims="$TMP_ROOT/child-shims"
 "$GUARD" install-shims "$child_shims" || fail "child guard shims should install"
@@ -618,6 +676,9 @@ for (const runtime of runtimes) {
   await assert.rejects(runtime.call(`gh api --method POST graphql -f 'query=mutation { addComment(input:{subjectId:"protected-id",body:"text"}) { clientMutationId } }'`), /protected-upstream-write/);
   await runtime.call("gh pr view 48 --repo kunchenguid/dotfiles");
   await runtime.call(`gh api --method POST graphql -f 'query={ organization(login:"kunchenguid"){ id } }'`);
+  await assert.rejects(runtime.call(`gh api --method POST https://api.github.com/graphql -f 'query=mutation { addComment(input:{subjectId:"protected-id",body:"text"}) { clientMutationId } }'`), /protected-upstream-write/);
+  await assert.rejects(runtime.call("gh api /graphql --input synthetic-not-opened.json --template 'query=sent'"), /protected-upstream-write/);
+  await runtime.call("gh api https://api.github.com/graphql --raw-field='query={viewer{login}}' --template 'query=mutation'");
   await runtime.call("gh pr create --repo Jin-HoMLee/dotfiles --title intended");
   for (const tool of ["read", "mcp_runner"]) await runtime.other(tool, "gh pr merge 48 --repo kunchenguid/dotfiles");
   await runtime.call(undefined);
@@ -653,10 +714,14 @@ pass "the only override is exact, audited, and unavailable to workers"
 graphql_home="$TMP_ROOT/graphql-auth-home"
 printf '%s\n' 'Add exactly one test comment in kunchenguid/dotfiles.' >"$TMP_ROOT/graphql-words.txt"
 for tool in gh gh-axi; do
-  FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
-    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
-    "$tool" api --method POST graphql -R kunchenguid/dotfiles -f "$mutation" \
-    || fail "explicit GraphQL authorization should still execute and audit"
+  for endpoint in graphql /graphql https://api.github.com/graphql; do
+    FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+      "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
+      "$tool" api --method POST "$endpoint" -R kunchenguid/dotfiles -f "$mutation" \
+      || fail "explicit GraphQL authorization should still execute and audit through $endpoint"
+  done
+  [ "$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f | wc -l | tr -d ' ')" = 3 ] \
+    || fail "each equivalent GraphQL authorization should create its own audit record"
   record=$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
   [ -n "$record" ] || fail "GraphQL authorization did not create an audit record"
   assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "GraphQL authorization omitted the exact repo"
