@@ -78,7 +78,7 @@ normalize_repo() {
     */*) ;;
     *) return 1 ;;
   esac
-  case "$value" in *[!A-Za-z0-9_.-/-]*|*//*|/*|*/|*/*/*) return 1 ;; esac
+  case "$value" in *[!A-Za-z0-9_./-]*|*//*|/*|*/|*/*/*) return 1 ;; esac
   printf '%s\n' "$(lower "${value%%/*}")/${value#*/}"
 }
 
