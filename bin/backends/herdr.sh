@@ -2467,6 +2467,13 @@ fm_backend_herdr_pane_agent_session_ref() {  # <session> <pane_id>
   local session=$1 pane_id=$2 out agent kind value
   [ -n "$session" ] && [ -n "$pane_id" ] || return 1
   out=$(fm_backend_herdr_cli "$session" agent get "$pane_id" 2>&1) || return 1
+  # Reject controls while still JSON-encoded. Command substitution would strip
+  # a trailing newline and could otherwise turn a different reference into a
+  # valid-looking session path/id before the lifecycle owner compares it.
+  printf '%s' "$out" | jq -e '
+    .result.agent | [.agent, .agent_session.kind, .agent_session.value] |
+    all(type == "string" and length > 0 and (explode | all(. >= 32 and . != 127)))
+  ' >/dev/null 2>&1 || return 1
   agent=$(printf '%s' "$out" | jq -r '.result.agent.agent // empty' 2>/dev/null)
   kind=$(printf '%s' "$out" | jq -r '.result.agent.agent_session.kind // empty' 2>/dev/null)
   value=$(printf '%s' "$out" | jq -r '.result.agent.agent_session.value // empty' 2>/dev/null)

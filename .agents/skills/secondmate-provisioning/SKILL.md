@@ -28,7 +28,7 @@ An explicitly bound local shared-code route uses:
 - <id> - <one-sentence charter summary> (root: <absolute-primary-code-root>; home: <absolute-existing-home>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
-[`Local shared-code binding`](../../../docs/configuration.md#local-shared-code-binding) owns its limited runtime support, activation/recovery boundary, preservation requirements, and unsupported primary/Herdr handoffs.
+[`Local shared-code binding`](../../../docs/configuration.md#local-shared-code-binding) owns its limited runtime support, prepared individual-reference view, activation/recovery boundary, preservation requirements, and unsupported primary/cross-root handoffs.
 It is opt-in, never inferred from `FM_HOME`, and does not merge or replace private homes.
 
 A whole-home remote route uses:
@@ -96,7 +96,8 @@ It also writes the gitignored `.fm-secondmate-parent` durable binding before the
 Select the registered mate's id when resolving its pin; [`bin/fm-harness.sh`](../../../bin/fm-harness.sh)'s header owns the resolver commands.
 
 This section is the single owner of the secondmate sync and inherited-local-material propagation contract; `AGENTS.md` sections 3 and 4 point here.
-An explicit local shared-code route keeps its old tracked home source untouched through launch, recovery and update; it uses the validated primary code root for the native command and code tools, with the existing home for private state.
+An explicit local shared-code route never modifies retained home source through launch, recovery or update; it uses the validated primary code root for code tools and primary native extensions, with the existing home for private state.
+Its verified, already-prepared individual-reference view also keeps native cwd, settings, trust and session storage at that home; recognizing the view does not authorize creating references, moving original files, hiding mixed private directories or changing recorded context.
 Do not use that mode as proof of adoption, native handoff or retained-safeguard equivalence; follow its [configuration limits](../../../docs/configuration.md#local-shared-code-binding), and refuse unsupported axes without changing pins or backends.
 Before a legacy local launch, `fm-spawn.sh --secondmate` locally fast-forwards the home to the primary firstmate checkout's current default-branch commit when it is safe, or reconciles a clean divergence whose complete local result is already present there (e.g. after a squash merge) with `reset --keep`; dirty, uniquely diverged, or in-flight homes launch unchanged with a warning, and a genuine divergence gets the same durable reconciliation record `bin/fm-ff-lib.sh` writes for `/updatefirstmate`.
 The locked session-start deferred network stage runs the same bootstrap sweep for every live local secondmate home, discovered from `state/<id>.meta` records with `kind=secondmate` (`data/secondmates.md` only backfills `home=` for older records).

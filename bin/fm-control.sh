@@ -905,6 +905,11 @@ journal_write() {  # <phase> [extra-line]...
     echo "to_harness=$TARGET_HARNESS"
     echo "to_model=$TARGET_MODEL"
     echo "to_effort=$TARGET_EFFORT"
+    # Keep this pre-stop identity through failure rewrites too; a refusal must
+    # not erase which conversation the transaction was required to preserve.
+    if [ -n "${CONTROL_NATIVE_SESSION_REF:-}" ]; then
+      printf 'code_native_session_ref=%s\n' "$CONTROL_NATIVE_SESSION_REF"
+    fi
     local line
     for line in "$@"; do
       echo "$line"
@@ -983,6 +988,7 @@ relaunch_rollback() {
 }
 
 resolve_relaunch_profile() {
+  CONTROL_NATIVE_SESSION_REF=
   PRIOR_HARNESS=$HARNESS
   PRIOR_RECORDED_HARNESS=$RECORDED_HARNESS
   PRIOR_MODEL=$(fm_meta_get "$META" model)
@@ -1040,17 +1046,24 @@ resolve_relaunch_profile() {
   fm_control_harness_supports_kind "$TARGET_HARNESS" "$KIND" \
     || die "'$TARGET_HARNESS' is not verified to run a $KIND task, so relaunching $ID onto it would stop the running agent for a launch that must be refused; choose an adapter verified for this kind"
   if [ "$KIND" = secondmate ]; then
-    local recorded_code_root
+    local recorded_code_root recorded_native_cwd
     recorded_code_root=$(secondmate_code_root_from_meta "$META") || die "invalid code_root metadata for $ID"
     secondmate_local_code_binding "$DATA/secondmates.md" "$ID" "$WT" "$FM_ROOT" "$recorded_code_root" \
       || die "${SECONDMATE_REGISTRY_ERROR:-cannot resolve the local shared-code binding for $ID}"
     if [ -n "$SECONDMATE_LOCAL_CODE_ROOT" ]; then
-      secondmate_shared_code_launch_supported "$TARGET_HARNESS" "$BACKEND" || return 1
-      secondmate_shared_code_native_files "$SECONDMATE_LOCAL_CODE_ROOT" "$WT" || return 1
-      local shared_pi_executable
+      recorded_native_cwd=$(secondmate_code_native_cwd_from_meta "$META") || die 'invalid shared-code native cwd metadata'
+      secondmate_shared_code_native_files "$SECONDMATE_LOCAL_CODE_ROOT" "$WT" "$recorded_native_cwd" || return 1
+      secondmate_shared_code_launch_supported "$TARGET_HARNESS" "$BACKEND" "$SECONDMATE_SHARED_NATIVE_CWD" "$WT" || return 1
+      local shared_pi_executable shared_resume_identity
       shared_pi_executable=$(type -P -- "$TARGET_HARNESS") || die 'selected Pi executable is unavailable before replacement'
-      secondmate_shared_code_pi_session_cli "$shared_pi_executable" || return 1
-      secondmate_shared_code_pi_session_dir "$WT" >/dev/null || return 1
+      if [ "$SECONDMATE_SHARED_NATIVE_CWD" = "$SECONDMATE_LOCAL_CODE_ROOT" ]; then
+        secondmate_shared_code_pi_session_cli "$shared_pi_executable" || return 1
+        secondmate_shared_code_pi_session_dir "$WT" >/dev/null || return 1
+      elif [ "$BACKEND" = herdr ]; then
+        shared_resume_identity=$(secondmate_shared_code_resume_identity "$TARGET_HARNESS" "$T" "$WT") \
+          || die 'retained-home shared-code replacement requires the existing Pi session identity before stopping the agent'
+        CONTROL_NATIVE_SESSION_REF=${shared_resume_identity#*$'\t'}
+      fi
     fi
   fi
   # A model or effort chosen for the previous harness does not transfer to a
@@ -1197,7 +1210,7 @@ safe_checkpoint() {
     if [ -n "${SECONDMATE_LOCAL_CODE_ROOT:-}" ]; then
       head=$(git -C "$SECONDMATE_LOCAL_CODE_ROOT" rev-parse --verify HEAD) \
         || die "shared code HEAD cannot be inspected before replacement"
-      CHECKPOINT_LINES+=("code_root=$SECONDMATE_LOCAL_CODE_ROOT" "code_head=$head")
+      CHECKPOINT_LINES+=("code_root=$SECONDMATE_LOCAL_CODE_ROOT" "code_head=$head" "code_native_cwd=$SECONDMATE_SHARED_NATIVE_CWD")
     fi
   fi
 }
@@ -1289,7 +1302,7 @@ do_relaunch() {
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
   [ -z "$TARGET_ACCOUNT" ] || spawn_args+=(--account "$TARGET_ACCOUNT")
-  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
+  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" FM_CONTROL_NATIVE_SESSION_REF="$CONTROL_NATIVE_SESSION_REF" \
       "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
     RELAUNCH_META_PUBLISHED=1
     # $T was resolved from the record before the launch. When the recorded

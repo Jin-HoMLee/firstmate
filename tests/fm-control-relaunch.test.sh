@@ -2925,9 +2925,16 @@ case "${1:-} ${2:-}" in
     fi
     exit 0 ;;
   'pane process-info')
+    # Opt-in external identity change after the new case's pre-stop read.
+    if [ -f "$D/herdr-next-registration" ]; then
+      mv "$D/herdr-next-registration" "$D/herdr-agent-registration"
+    fi
     # A retained registration with a shell-only pane models an exited agent
     # whose Herdr status authority still belongs to its previous session.
-    if [ -f "$D/herdr-agent-registration" ]; then
+    if [ -f "$D/herdr-resume-becomes-live" ] && [ -f "$D/herdr-agent-live" ]; then
+      printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4242,"foreground_processes":[{"pid":4243,"name":"pi","argv":["pi"],"cmdline":"pi"}]}}}\n' \
+        "$(cat "$D/herdr-pane")"
+    elif [ -f "$D/herdr-agent-registration" ]; then
       printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":4242,"foreground_processes":[]}}}\n' \
         "$(cat "$D/herdr-pane")"
     else
@@ -2979,7 +2986,14 @@ SH
   chmod +x "$fb/herdr"
   cat > "$fb/ps" <<'SH'
 #!/usr/bin/env bash
-if [ -f "$FM_FAKE_DIR/herdr-agent-registration" ]; then
+if [ -f "$FM_FAKE_DIR/herdr-resume-becomes-live" ] && [ -f "$FM_FAKE_DIR/herdr-agent-live" ]; then
+  case "$*" in
+    '-axo pid=,ppid=,comm=') printf '4242 1 bash\n4243 4242 pi\n' ;;
+    '-p 4242 -o args=') printf 'bash\n' ;;
+    '-p 4243 -o args=') printf 'pi\n' ;;
+    *) exec /bin/ps "$@" ;;
+  esac
+elif [ -f "$FM_FAKE_DIR/herdr-agent-registration" ]; then
   case "$*" in
     '-axo pid=,ppid=,comm=') printf '4242 1 bash\n' ;;
     '-p 4242 -o args=') printf 'bash\n' ;;
@@ -3048,6 +3062,95 @@ herdr_case_or_skip() {  # <name> <id> [session] [surviving-pane]
   add_herdr_ship_task "$HERDR_CASE_DIR" "$2" "${3:-fmlab}" "${4:-%7}"
   make_herdr_stub "$HERDR_CASE_DIR"
   return 0
+}
+
+test_herdr_reference_view_keeps_existing_session_and_refuses_unknown_identity() {
+  local dir id registered paths path out rc command before session_ref session_before agent session_cwd
+  command -v jq >/dev/null 2>&1 || { echo 'skip - retained-home Herdr fixtures need jq'; return 0; }
+  for registered in pi claude missing wrong-cwd changed-after-checkpoint control-ref control-cwd; do
+    id="ref-$registered"
+    dir=$(new_case "$id" "$id")
+    add_shared_code_secondmate "$dir" "$id"
+    # Prepare only this fresh synthetic home; production does no such moves.
+    rm "$dir/code/bin"
+    cp -R "$ROOT/bin" "$dir/code/bin"
+    git -C "$dir/code" add -A
+    git -C "$dir/code" commit -qm 'synthetic retained-native-home source'
+    mkdir -p "$dir/smhome/data/reference-originals" "$dir/smhome/.pi/extensions"
+    paths=$(git -C "$dir/code" ls-tree -r --name-only HEAD -- AGENTS.md README.md CONTRIBUTING.md .tasks.toml bin .pi/extensions)
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      mkdir -p "$(dirname "$dir/smhome/$path")" "$(dirname "$dir/smhome/data/reference-originals/$path")"
+      if [ -e "$dir/smhome/$path" ] || [ -L "$dir/smhome/$path" ]; then
+        mv "$dir/smhome/$path" "$dir/smhome/data/reference-originals/$path"
+      fi
+      ln -s "$dir/code/$path" "$dir/smhome/$path"
+    done <<< "$paths"
+    printf 'private native settings remain at home\n' > "$dir/smhome/.pi/settings.json"
+    # This models first activation from the existing legacy home, not an
+    # implicit migration of a previously recorded shared native cwd.
+    awk '!/^(window|code_root|code_head)=/' "$dir/home/state/$id.meta" > "$dir/next.meta"
+    {
+      printf 'window=fmlab:%%7\nbackend=herdr\nherdr_session=fmlab\n'
+      printf 'herdr_workspace_id=ws1\nherdr_tab_id=tab1\nherdr_pane_id=%%7\n'
+    } >> "$dir/next.meta"
+    mv "$dir/next.meta" "$dir/home/state/$id.meta"
+    make_herdr_stub "$dir"
+    : > "$dir/fake/herdr-resume-becomes-live"
+    printf '%%7' > "$dir/fake/herdr-pane"
+    : > "$dir/fake/herdr-log"
+    session_ref="$dir/smhome/data/original-native.jsonl"
+    session_cwd="$dir/smhome"
+    agent=$registered
+    if [ "$registered" = wrong-cwd ]; then session_cwd="$dir/proj"; agent=pi; fi
+    case "$registered" in changed-after-checkpoint|control-ref|control-cwd) agent=pi ;; esac
+    [ "$registered" != control-cwd ] || session_cwd="${session_cwd}"$'\n'
+    jq -nc --arg cwd "$session_cwd" '{type:"session",id:"kept-native-id",cwd:$cwd}' > "$session_ref"
+    printf '{"type":"message","sentinel":"retained synthetic conversation, not inspected"}\n' >> "$session_ref"
+    session_before=$(git hash-object "$session_ref")
+    if [ "$registered" != missing ]; then
+      printf '{"result":{"agent":{"agent":"%s","agent_status":"idle","agent_session":{"kind":"path","value":"%s"}}}}\n' \
+        "$agent" "$session_ref" > "$dir/fake/herdr-agent-registration"
+    fi
+    if [ "$registered" = control-ref ]; then
+      jq '.result.agent.agent_session.value += "\n"' "$dir/fake/herdr-agent-registration" > "$dir/fake/registration.tmp"
+      mv "$dir/fake/registration.tmp" "$dir/fake/herdr-agent-registration"
+    fi
+    if [ "$registered" = changed-after-checkpoint ]; then
+      cp "$session_ref" "$dir/smhome/data/different-native.jsonl"
+      jq --arg ref "$dir/smhome/data/different-native.jsonl" '.result.agent.agent_session.value = $ref' \
+        "$dir/fake/herdr-agent-registration" > "$dir/fake/herdr-next-registration"
+    fi
+    before=$(git hash-object "$dir/home/state/$id.meta")
+    rc=0
+    out=$(FM_ROOT_OVERRIDE="$dir/code" run_control "$dir" "$id" relaunch) || rc=$?
+    if [ "$registered" = pi ]; then
+      expect_code 0 "$rc" "prepared retained-home Herdr replacement should use ordinary same-session resume"$'\n'"$out"
+      command=$(cat "$dir/fake/launched-command")
+      assert_contains "$command" "cd -- '$dir/smhome' && FM_ROOT_OVERRIDE='$dir/code'" 'native home and maintained code remain separate'
+      assert_contains "$command" "--session '$session_ref'" 'existing native identity is resumed'
+      assert_not_contains "$command" --session-dir 'original native storage selection stays unchanged'
+      assert_not_contains "$command" --approve 'project trust is not bypassed'
+      assert_equals "$dir/smhome" "$(meta_field "$dir" "$id" code_native_cwd)" 'native context recorded separately'
+      assert_equals "$dir/smhome" "$(journal_field "$dir" "$id" code_native_cwd)" 'pre-stop transaction includes native context'
+      assert_equals "$session_ref" "$(journal_field "$dir" "$id" code_native_session_ref)" 'transaction pins the pre-stop session reference'
+    elif [ "$registered" = changed-after-checkpoint ]; then
+      expect_code 1 "$rc" 'a changed same-home session after the checkpoint must not be substituted'
+      assert_contains "$out" 'registered Pi session differs from the pre-stop checkpoint' 'identity drift is distinguished from a usable new session'
+      assert_equals "$session_ref" "$(journal_field "$dir" "$id" code_native_session_ref)" 'original session remains recorded in the failed transaction'
+      [ ! -e "$dir/fake/launched-command" ] || fail 'a different same-home session was launched'
+    else
+      expect_code 1 "$rc" 'unverified reference-view native identity must refuse before replacement'
+      assert_contains "$out" 'existing Pi session identity before stopping' 'specific continuity precondition reported'
+      assert_equals "$before" "$(git hash-object "$dir/home/state/$id.meta")" 'refusal leaves original identity record unchanged'
+      [ ! -e "$dir/fake/launched-command" ] || fail 'unknown native identity caused a replacement launch'
+      assert_no_grep 'pane.send-' "$dir/fake/herdr-log" 'identity refusal sends no lifecycle input'
+    fi
+    assert_equals "$session_before" "$(git hash-object "$session_ref")" 'session header and conversation bytes are unchanged'
+    assert_grep 'private native settings remain at home' "$dir/smhome/.pi/settings.json" 'private native settings preserved'
+    assert_grep 'retained instructions' "$dir/smhome/data/reference-originals/AGENTS.md" 'modeled original instructions preserved'
+  done
+  pass 'fm-control retained-home references use the same Herdr Pi session and refuse foreign/missing identity before stopping'
 }
 
 test_herdr_relaunch_resumes_only_the_registered_pi_session() {
@@ -3495,6 +3598,7 @@ test_tmux_refuses_a_session_that_cannot_be_found
 test_tmux_refuses_when_the_server_is_gone
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
+test_herdr_reference_view_keeps_existing_session_and_refuses_unknown_identity
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server
 test_herdr_rebind_stays_in_the_recorded_session

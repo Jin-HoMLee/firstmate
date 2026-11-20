@@ -146,6 +146,11 @@ test_binding_metadata_is_unambiguous() {
   printf 'code_root=%s\ncode_head=%s\n' "$w/code" "$head" > "$meta"
   assert_equals "$w/code" "$(secondmate_code_root_from_meta "$meta")" 'root metadata round trip'
   assert_equals "$head" "$(secondmate_code_head_from_meta "$meta")" 'launch HEAD metadata round trip'
+  assert_equals "$w/code" "$(secondmate_code_native_cwd_from_meta "$meta")" 'older shared-cwd records keep their native cwd'
+  printf 'code_native_cwd=%s\n' "$w/home" >> "$meta"
+  assert_equals "$w/home" "$(secondmate_code_native_cwd_from_meta "$meta")" 'native cwd is independent from code root'
+  printf 'code_native_cwd=%s\n' "$w/home" >> "$meta"
+  if secondmate_code_native_cwd_from_meta "$meta" >/dev/null; then fail 'duplicate native cwd accepted'; fi
   printf 'code_root=%s\n' "$w/code" >> "$meta"
   if secondmate_code_root_from_meta "$meta" >/dev/null; then fail 'duplicate root metadata accepted'; fi
   printf 'code_head=--not-a-commit\n' > "$meta"
@@ -377,6 +382,165 @@ test_missing_native_source_refuses_before_endpoint_creation() {
   pass 'missing shared native wiring refuses before creating or activating a replacement'
 }
 
+# This fixture-only preparation is deliberately not an adoption implementation.
+# Every moved original was created by add_retained_home above, and all retained
+# bytes stay in that fresh fixture. Production merely recognizes completed views.
+prepare_fixture_reference_view() {
+  local w=$1 home=$2 path paths
+  if [ -L "$w/code/bin" ]; then
+    rm "$w/code/bin"
+    cp -R "$ROOT/bin" "$w/code/bin"
+    mkdir -p "$w/code/.agents/skills/managed/assets" "$w/code/.pi/extensions/lib" "$w/code/.claude/mods/linked"
+    printf 'linked managed skill\n' > "$w/code/.claude/mods/linked/SKILL.md"
+    printf 'linked managed library\n' > "$w/code/.claude/mods/linked/lib.ts"
+    ln -s ../../.claude/mods/linked "$w/code/.agents/skills/linked"
+    ln -s ../../../.claude/mods/linked/lib.ts "$w/code/.pi/extensions/lib/linked.ts"
+    printf 'managed skill\n' > "$w/code/.agents/skills/managed/SKILL.md"
+    printf 'managed asset\n' > "$w/code/.agents/skills/managed/assets/proof.txt"
+    printf 'managed relative import\n' > "$w/code/.pi/extensions/lib/managed.ts"
+    git -C "$w/code" add -A
+    git -C "$w/code" commit -qm 'synthetic complete reference source'
+  fi
+  mkdir -p "$home/data/reference-originals/bin" "$home/.pi/extensions" "$home/.agents/skills/managed" "$home/.claude/mods/linked"
+  printf 'private aliased-directory content\n' > "$home/.claude/mods/linked/private-note.txt"
+  printf 'private mixed extension\n' > "$home/.pi/extensions/private.ts"
+  printf 'private same-skill-directory file\n' > "$home/.agents/skills/managed/private-note.txt"
+  printf 'private mixed script\n' > "$home/bin/private-script"
+  mv "$home/AGENTS.md" "$home/data/reference-originals/AGENTS.md"
+  mv "$home/bin/old-source" "$home/data/reference-originals/bin/old-source"
+  paths=$(secondmate_shared_code_reference_paths "$w/code")
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    mkdir -p "$(dirname "$home/$path")"
+    [ ! -e "$home/$path" ] && [ ! -L "$home/$path" ] || fail 'fixture preparation would replace an unplanned path'
+    if [ -L "$w/code/$path" ]; then
+      ln -s "$(readlink "$w/code/$path")" "$home/$path"
+    else
+      ln -s "$w/code/$path" "$home/$path"
+    fi
+  done <<< "$paths"
+}
+
+test_prepared_reference_view_keeps_native_home_and_private_semantics() {
+  local w id home harness launch marker native before head meta
+  w=$(new_shared_world 'prepared references')
+  for id in sm1 sm2; do
+    add_retained_home "$w" "$id"
+    home="$w/$id"
+    prepare_fixture_reference_view "$w" "$home"
+    printf 'private home native settings\n' > "$home/.pi/settings.json"
+    printf 'private home base prompt\n' > "$home/.pi/SYSTEM.md"
+    printf 'private home appended prompt\n' > "$home/.pi/APPEND_SYSTEM.md"
+    printf 'unrelated primary settings\n' > "$w/code/.pi/settings.json"
+    before=$(git -C "$home" diff HEAD)
+    head=$(git -C "$home" rev-parse HEAD)
+    harness=pi
+    [ "$id" != sm2 ] || harness=pi-signed
+    shared_spawn "$w" "$id" "$harness" > "$w/$id.log" 2>&1 || fail "prepared reference spawn failed: $(cat "$w/$id.log")"
+    meta="$w/parent/state/$id.meta"
+    assert_equals "$home" "$(secondmate_code_native_cwd_from_meta "$meta")" 'reference view records retained native cwd'
+    launch=$(fm_test_launch_unframe "$(cat "$w/launch")")
+    marker="cd -- '$home' && "
+    case "$launch" in *"$marker"*) ;; *) fail 'reference launch changed native cwd' ;; esac
+    native="$marker${launch#*"$marker"}"
+    (cd "$home" && HOME="$w/user-home" PI_CODING_AGENT_DIR="$w/selected-account" FM_FAKE_WORLD="$w" /bin/bash -c "$native") \
+      || fail 'prepared reference command suffix failed'
+    assert_grep "cwd=$home" "$w/probe" 'native cwd remains the operational home'
+    assert_grep "root=$w/code" "$w/probe" 'maintained code selection remains explicit'
+    assert_grep 'account_dir='"$w/selected-account" "$w/probe" 'account selection unchanged'
+    assert_no_grep --session-dir "$w/probe" 'existing native session namespace is not retargeted'
+    assert_no_grep --approve "$w/probe" 'retained native project trust is not overridden'
+    assert_grep "$w/code/.pi/extensions/fm-primary-pi-watch.ts" "$w/probe" 'explicit primary source stays canonical'
+    assert_equals "$head" "$(git -C "$home" rev-parse HEAD)" 'retained Git history unchanged'
+    assert_equals "$before" "$(git -C "$home" diff HEAD)" 'prepared view and private bytes unchanged by launch'
+    assert_grep 'unfinished tracked work' "$home/data/reference-originals/AGENTS.md" 'fixture original unfinished bytes remain preserved'
+    assert_grep 'private mixed extension' "$home/.pi/extensions/private.ts" 'mixed private extension retained'
+    assert_grep 'private same-skill-directory' "$home/.agents/skills/managed/private-note.txt" 'mixed skill content retained'
+    assert_grep 'private aliased-directory content' "$home/.agents/skills/linked/private-note.txt" 'relative skill alias still reaches the mixed home directory'
+    assert_grep 'linked managed library' "$home/.pi/extensions/lib/linked.ts" 'relative module alias reaches individually linked maintained code'
+    assert_grep 'private home native settings' "$home/.pi/settings.json" 'private settings neither read nor replaced'
+    [ ! -e "$home/data/pi-sessions" ] || fail 'reference launch created a new session namespace'
+    secondmate_shared_code_native_files "$w/code" "$home" "$home" || fail 'sticky reference preflight refused'
+    secondmate_shared_code_launch_supported "$harness" herdr "$SECONDMATE_SHARED_NATIVE_CWD" "$home" || fail 'same-home Herdr axis refused'
+    if secondmate_shared_code_native_files "$w/code" "$home" "$w/code" >/dev/null 2>&1; then fail 'recorded shared-cwd identity silently changed'; fi
+  done
+  pass 'prepared individual references keep Pi-family cwd, trust, account, native storage and mixed private resources home-local'
+}
+
+test_incomplete_reference_view_preserves_conflicting_originals() {
+  local w home path before rc
+  w=$(new_shared_world 'incomplete references')
+  add_retained_home "$w" sm
+  home="$w/sm"
+  prepare_fixture_reference_view "$w" "$home"
+  # A temporary PATH on a shell function does not clear Bash's executable
+  # cache; remove that fixture-only cache so Python is genuinely unavailable.
+  hash -r
+  if PATH="$w/no-tools" secondmate_shared_code_references_valid "$w/code" "$home" > "$w/missing-python.log" 2>&1; then fail 'missing reference-check dependency was accepted'; fi
+  assert_grep 'python3 is required' "$w/missing-python.log" 'missing interpreter does not choose another context'
+  path="$home/.agents/skills/managed/SKILL.md"
+  rm "$path" # Only the exact synthetic link just prepared above.
+  printf 'locally modified original cannot be overwritten\n' > "$path"
+  before=$(git hash-object "$path")
+  rc=0
+  shared_spawn "$w" sm pi > "$w/refusal.log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail 'partial view silently fell back to common cwd'
+  assert_grep 'managed references are incomplete' "$w/refusal.log" 'partial view identifies source coverage failure'
+  assert_equals "$before" "$(git hash-object "$path")" 'conflicting original bytes unchanged'
+  [ ! -e "$w/windows" ] || fail 'incomplete view created an endpoint'
+  # Restore the modeled reference, then expose a retired managed original.
+  mv "$path" "$home/data/reference-originals/conflicting-skill"
+  ln -s "$w/code/.agents/skills/managed/SKILL.md" "$path"
+  cp "$home/data/reference-originals/bin/old-source" "$home/bin/old-source"
+  if secondmate_shared_code_native_files "$w/code" "$home" "$home" >/dev/null 2>&1; then fail 'retired active managed original accepted'; fi
+  assert_grep 'old source' "$home/bin/old-source" 'retired original is not silently removed'
+  mv "$home/bin/old-source" "$home/data/reference-originals/retired-copy"
+  rm "$home/.agents/skills/linked" # Only the known synthetic relative alias.
+  ln -s "$w/code/.agents/skills/linked" "$home/.agents/skills/linked"
+  if secondmate_shared_code_native_files "$w/code" "$home" "$home" >/dev/null 2>&1; then fail 'whole-directory redirect hid home-private resource siblings'; fi
+  assert_grep 'private aliased-directory content' "$home/.claude/mods/linked/private-note.txt" 'mixed directory original is unchanged'
+  rm "$home/.agents/skills/linked"
+  ln -s ../../.claude/mods/linked "$home/.agents/skills/linked"
+  printf 'uncommitted shared source\n' >> "$w/code/.claude/mods/linked/lib.ts"
+  if secondmate_shared_code_native_files "$w/code" "$home" "$home" >/dev/null 2>&1; then fail 'uncommitted linked source was presented as committed code'; fi
+  assert_grep 'uncommitted shared source' "$w/code/.claude/mods/linked/lib.ts" 'source edits are not repaired or discarded'
+  git -C "$w/code" add .claude/mods/linked/lib.ts
+  git -C "$w/code" commit -qm 'retain synthetic source edit'
+  mkdir "$w/code/untracked-hop"
+  rm "$w/code/.agents/skills/linked" "$home/.agents/skills/linked"
+  ln -s ../../untracked-hop/../.claude/mods/linked "$w/code/.agents/skills/linked"
+  ln -s ../../untracked-hop/../.claude/mods/linked "$home/.agents/skills/linked"
+  git -C "$w/code" add .agents/skills/linked
+  git -C "$w/code" commit -qm 'synthetic relative alias with an unmodeled intermediate directory'
+  if secondmate_shared_code_native_files "$w/code" "$home" "$home" >/dev/null 2>&1; then fail 'identical relative alias bytes were accepted without a matching home target'; fi
+  assert_grep 'private aliased-directory content' "$home/.claude/mods/linked/private-note.txt" 'unresolved alias does not remove original siblings'
+  pass 'partial views, retired originals, directory redirects, dirty source and unresolved relative aliases preserve retained work on refusal'
+}
+
+test_reference_resume_uses_verified_existing_identity() (
+  # Pure backend response doubles, not an actual service/endpoint operation.
+  . "$ROOT/bin/fm-control-lib.sh"
+  fm_backend_source() { [ "$1" = herdr ]; }
+  fm_backend_herdr_parse_target() { [ "$1" = fixture-target ] || return 1; FM_BACKEND_HERDR_SESSION=fixture; FM_BACKEND_HERDR_PANE=pane; }
+  fm_backend_herdr_pane_agent_session_ref() { printf '%s\n' "$FAKE_NATIVE_IDENTITY"; }
+  local native_home="$TMP_ROOT/native-identity-home" session_file
+  mkdir -p "$native_home"
+  session_file="$native_home/session.jsonl"
+  printf '{"type":"session","id":"kept-native-id","cwd":"%s"}\n' "$native_home" > "$session_file"
+  printf -v FAKE_NATIVE_IDENTITY 'pi\t%s' "$session_file"
+  assert_equals "$FAKE_NATIVE_IDENTITY" "$(secondmate_shared_code_resume_identity pi fixture-target "$native_home")" 'registered Pi identity retained'
+  assert_equals "$FAKE_NATIVE_IDENTITY" "$(secondmate_shared_code_resume_identity pi-signed fixture-target "$native_home")" 'signed Pi uses same native identity contract'
+  for FAKE_NATIVE_IDENTITY in '' $'pi\t' $'pi\tid-only-no-store-guess' $'claude\tother-session' $'pi\tref\tsecond-field' $'pi\tref\nsecond-line'; do
+    if secondmate_shared_code_resume_identity pi fixture-target "$native_home" >/dev/null; then fail 'unverified identity accepted for required continuity'; fi
+  done
+  printf -v FAKE_NATIVE_IDENTITY 'pi\t%s' "$session_file"
+  printf '{"type":"session","id":"other","cwd":"%s"}\n' "$TMP_ROOT" > "$session_file"
+  if secondmate_shared_code_resume_identity pi fixture-target "$native_home" >/dev/null; then fail 'foreign native cwd accepted'; fi
+  printf '{"type":"session","id":"kept","cwd":"%s"} {}\n' "$native_home" > "$session_file"
+  if secondmate_shared_code_resume_identity pi fixture-target "$native_home" >/dev/null; then fail 'malformed multi-object native header accepted'; fi
+  pass 'reference-view resume requires the existing Pi registration and never fabricates a fresh-session fallback'
+)
+
 test_local_shared_registry_is_explicit_and_disjoint
 test_binding_is_sticky_and_recorded_recovery_is_scoped
 test_binding_metadata_is_unambiguous
@@ -386,3 +550,6 @@ test_unsupported_or_unsafe_session_storage_refuses_before_endpoint_creation
 test_native_project_configuration_is_not_silently_retargeted
 test_retained_project_admin_and_unresolved_custody_are_not_relocated
 test_missing_native_source_refuses_before_endpoint_creation
+test_prepared_reference_view_keeps_native_home_and_private_semantics
+test_incomplete_reference_view_preserves_conflicting_originals
+test_reference_resume_uses_verified_existing_identity

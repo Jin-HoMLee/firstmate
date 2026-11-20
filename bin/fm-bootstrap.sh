@@ -461,7 +461,7 @@ secondmate_sync() {
   }
 
   secondmate_retry_pending_nudges() {
-    local marker id selector home commit message remote expected_marker meta meta_home home_real head out code_root retry_root launch_head
+    local marker id selector home commit message remote expected_marker meta meta_home home_real head out code_root retry_root launch_head native_cwd
     [ -d "$SECOND_MATE_NUDGE_PENDING_DIR" ] || return 0
     for marker in "$SECOND_MATE_NUDGE_PENDING_DIR"/*.pending; do
       [ -f "$marker" ] || continue
@@ -526,6 +526,11 @@ secondmate_sync() {
           continue
         fi
         retry_root=$SECONDMATE_LOCAL_CODE_ROOT
+        native_cwd=$(secondmate_code_native_cwd_from_meta "$meta") || native_cwd=invalid
+        if ! secondmate_shared_code_native_files "$retry_root" "$home_real" "$native_cwd"; then
+          echo "NUDGE_SECONDMATES: secondmate $id: send failed: shared-code native view changed"
+          continue
+        fi
         launch_head=$(secondmate_code_head_from_meta "$meta") || launch_head=
         if [ "$launch_head" != "$commit" ]; then
           echo "NUDGE_SECONDMATES: secondmate $id: send failed: shared source needs native refresh through the update/restart owner"

@@ -372,6 +372,24 @@ secondmate_code_head_from_meta() {  # <meta>; empty for a legacy/absent record
   ' "$meta"
 }
 
+# Native cwd is a separate, sticky launch fact, not another code installation.
+# Older shared-cwd launches lack this field and retain their recorded code root.
+secondmate_code_native_cwd_from_meta() {  # <meta>
+  local meta=$1 value root
+  root=$(secondmate_code_root_from_meta "$meta") || return 1
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
+  value=$(awk -F= '
+    $1 == "code_native_cwd" { n++; value=substr($0, index($0,"=")+1) }
+    END { if (n > 1 || (n == 1 && value == "")) exit 1; if (n == 1) print value }
+  ' "$meta") || return 1
+  if [ -n "$value" ]; then
+    [ -n "$root" ] || return 1
+    printf '%s\n' "$value"
+  elif [ -n "$root" ]; then
+    printf '%s\n' "$root"
+  fi
+}
+
 SECONDMATE_LOCAL_CODE_ROOT=
 secondmate_local_code_binding() {  # <registry> <id> <home> <owner-root> <recorded-root>
   local reg=$1 id=$2 home=$3 owner=$4 recorded=$5 declared='' count root top gd common recorded_real home_real
@@ -446,13 +464,42 @@ secondmate_local_code_binding() {  # <registry> <id> <home> <owner-root> <record
   SECONDMATE_LOCAL_CODE_ROOT=$root
 }
 
-secondmate_shared_code_launch_supported() {  # <harness> <backend>
-  # Herdr relaunch requires the endpoint's existing Pi session identity (see
-  # fm-spawn.sh:relaunch_resume_args). A cross-root fresh-context handoff is
-  # not proved here; do not silently resume old context or freeze its status.
-  case "$1:$2" in pi:tmux|pi-signed:tmux) return 0 ;; esac
-  printf 'error: local shared-code launch supports Pi/pi-signed on tmux only; refusing %s/%s before replacement\n' "$1" "$2" >&2
+secondmate_shared_code_launch_supported() {  # <harness> <backend> [native-cwd] [home]
+  case "$1:$2" in
+    pi:tmux|pi-signed:tmux) return 0 ;;
+    pi:herdr|pi-signed:herdr)
+      # Ordinary same-home resume is supported; this is not cross-root resume.
+      [ -n "${3:-}" ] && [ "$3" = "${4:-}" ] && return 0
+      ;;
+  esac
+  printf 'error: local shared-code launch supports Pi/pi-signed on tmux only unless a retained-home reference view is verified for Herdr; refusing %s/%s before replacement\n' "$1" "$2" >&2
   return 1
+}
+
+secondmate_shared_code_resume_identity() {  # <harness> <Herdr-target> <retained-home>
+  local identity agent ref flag cwd
+  fm_backend_source herdr || return 1
+  fm_backend_herdr_parse_target "$2" || return 1
+  identity=$(fm_backend_herdr_pane_agent_session_ref "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") || return 1
+  case "$identity" in *$'\t'*) ;; *) return 1 ;; esac
+  agent=${identity%%$'\t'*}
+  ref=${identity#*$'\t'}
+  flag=$(fm_control_relaunch_resume_flag "$1" "$agent") || return 1
+  [ "$flag" = --session ] && [ -n "$ref" ] || return 1
+  case "$ref" in *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; /*) ;; *) return 1 ;; esac
+  # Pi resumes the session header's cwd before loading native resources. Prove
+  # the registered path belongs to this home; never guess an id-only session's
+  # account/store or execute Pi to inspect it. Inspect only the first header
+  # candidate; never traverse or emit conversation entries.
+  [ -f "$ref" ] && [ ! -L "$ref" ] && [ -r "$ref" ] && [ -O "$ref" ] || return 1
+  cwd=$(head -n 1 "$ref" | jq -Rer '
+    fromjson | select(.type == "session" and (.id | type == "string" and length > 0)
+      and (.cwd | type == "string" and length > 0)
+      and (.cwd | explode | all(. >= 32 and . != 127))) | .cwd
+  ' 2>/dev/null) || return 1
+  case "$cwd" in *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; /*) ;; *) return 1 ;; esac
+  [ "$(cd "$cwd" && pwd -P)" = "$3" ] || return 1
+  printf '%s\n' "$identity"
 }
 
 secondmate_shared_code_pi_session_cli() {  # <selected-Pi-executable>
@@ -492,8 +539,122 @@ secondmate_shared_code_pi_session_dir() {  # <home> [prepare]; requires fm-pr-li
   printf '%s\n' "$sessions"
 }
 
-secondmate_shared_code_native_files() {  # <code-root> <retained-home>
-  local root=$1 home=$2 name directory
+# The committed runtime/instruction surface defines required reference leaves.
+# This only recognizes an ALREADY prepared view: it never converts, archives,
+# moves, overwrites or removes any file, nor certifies original-file custody.
+SECONDMATE_REFERENCE_SURFACES=(AGENTS.md README.md CONTRIBUTING.md .tasks.toml bin .agents/skills
+  .pi/extensions .claude/mods skills docs .github/workflows)
+secondmate_shared_code_reference_paths() {  # <source-checkout>; diagnostic/fixture listing
+  GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 git -C "$1" -c core.quotepath=false \
+    ls-tree -r --name-only HEAD -- "${SECONDMATE_REFERENCE_SURFACES[@]}"
+}
+
+secondmate_shared_code_references_valid() {  # <code-root> <retained-home>
+  command -v python3 >/dev/null 2>&1 || {
+    printf 'error: python3 is required to verify prepared managed references\n' >&2; return 1;
+  }
+  # One stdlib metadata walk, not dirname/readlink/grep processes per leaf.
+  # It reads Git inventories and link/directory metadata, never private values.
+  python3 - "$1" "$2" "${SECONDMATE_REFERENCE_SURFACES[@]}" <<'PY_REFERENCES'
+import os
+import subprocess
+import sys
+
+root, home, *surfaces = sys.argv[1:]
+env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1")
+
+def require(condition):
+    if not condition:
+        raise ValueError("incomplete reference view")
+
+def git(where, *args):
+    return subprocess.run(["git", "-C", where, *args], env=env, check=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+
+def safe_path(path):
+    return bool(path) and not os.path.isabs(path) and not any(
+        ord(char) < 32 or ord(char) == 127 for char in path)
+
+def inventory(where):
+    values = git(where, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", *surfaces)
+    paths = {value.decode("utf-8") for value in values.split(b"\0") if value}
+    require(all(safe_path(path) and not {"", ".", ".."}.intersection(path.split("/")) for path in paths))
+    return paths
+
+def directory_key(path):
+    require(os.path.isdir(path) and os.access(path, os.X_OK))
+    return os.path.realpath(path)
+
+def target_key(path):
+    # Like the registry path owner: resolve directories and file parents, but
+    # leave a final file alias to its own inventory entry's validation.
+    if os.path.isdir(path):
+        return directory_key(path)
+    return os.path.join(directory_key(os.path.dirname(path)), os.path.basename(path))
+
+try:
+    git(root, "diff", "--no-ext-diff", "--no-textconv", "--quiet", "HEAD", "--", *surfaces)
+    paths, old_paths = inventory(root), inventory(home)
+    require({"AGENTS.md", "bin/fm-session-start.sh", ".pi/extensions/fm-primary-pi-watch.ts",
+             ".pi/extensions/fm-primary-turnend-guard.ts"}.issubset(paths))
+    for path in paths:
+        parent = os.path.dirname(path)
+        while parent:
+            for base in (root, home):
+                directory = os.path.join(base, parent)
+                require(os.path.isdir(directory) and not os.path.islink(directory))
+            parent = os.path.dirname(parent)
+        source, retained = os.path.join(root, path), os.path.join(home, path)
+        require(os.path.exists(source) and os.path.islink(retained))
+        if os.path.islink(source):
+            # Preserve relative directory aliases into the home's mixed
+            # directories; only their managed file leaves point at code.
+            link = os.readlink(source)
+            require(safe_path(link) and os.readlink(retained) == link)
+            target = target_key(os.path.join(os.path.dirname(source), link))
+            require(target.startswith(root + os.sep))
+            relative = os.path.relpath(target, root)
+            require(target_key(os.path.join(os.path.dirname(retained), link)) == os.path.join(home, relative))
+            require(relative in paths or any(item.startswith(relative + "/") for item in paths))
+        else:
+            require(os.readlink(retained) == source)
+    for path in old_paths - paths:
+        source, retained = os.path.join(root, path), os.path.join(home, path)
+        if os.path.lexists(retained):
+            # A broken exact maintained-source reference has no old bytes to
+            # load. Leave it untouched; never remove a retired original here.
+            require(os.path.islink(retained) and os.readlink(retained) == source
+                    and not os.path.exists(source))
+except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+    raise SystemExit(1)
+PY_REFERENCES
+}
+
+SECONDMATE_SHARED_NATIVE_CWD=
+secondmate_shared_code_native_files() {  # <code-root> <retained-home> [recorded-native-cwd]
+  local root=$1 home=$2 expected=${3:-} name directory
+  SECONDMATE_SHARED_NATIVE_CWD=$root
+  for name in fm-primary-pi-watch.ts fm-primary-turnend-guard.ts; do
+    [ -f "$root/.pi/extensions/$name" ] && [ -r "$root/.pi/extensions/$name" ] || {
+      printf 'error: shared-code primary extension is unavailable: %s\n' "$root/.pi/extensions/$name" >&2
+      return 1
+    }
+  done
+  if [ "$expected" = "$home" ] \
+    || { [ -L "$home/AGENTS.md" ] && [ "$(readlink "$home/AGENTS.md")" = "$root/AGENTS.md" ]; }; then
+    secondmate_shared_code_references_valid "$root" "$home" || {
+      printf 'error: retained-home managed references are incomplete or conflict with retained files; no files changed\n' >&2
+      return 1
+    }
+    SECONDMATE_SHARED_NATIVE_CWD=$home
+  fi
+  if [ -n "$expected" ] && [ "$expected" != "$SECONDMATE_SHARED_NATIVE_CWD" ]; then
+    printf 'error: shared-code native cwd differs from its recorded launch; refusing implicit context migration\n' >&2
+    return 1
+  fi
+  # Retained-cwd discovery keeps project settings, prompts, private/ancestor
+  # resources and the native session namespace in their existing locations.
+  [ "$SECONDMATE_SHARED_NATIVE_CWD" != "$home" ] || return 0
   # Pi's project settings and system prompts follow native cwd, not FM_HOME.
   # No supported per-home project-settings mapping is implemented here. Refuse
   # before replacement instead of losing home settings or importing the source
@@ -512,11 +673,5 @@ secondmate_shared_code_native_files() {  # <code-root> <retained-home>
         fi
       done
     fi
-  done
-  for name in fm-primary-pi-watch.ts fm-primary-turnend-guard.ts; do
-    [ -f "$root/.pi/extensions/$name" ] && [ -r "$root/.pi/extensions/$name" ] || {
-      printf 'error: shared-code primary extension is unavailable: %s\n' "$root/.pi/extensions/$name" >&2
-      return 1
-    }
   done
 }

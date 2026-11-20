@@ -553,7 +553,7 @@ FF_SEEN_HOMES=""
 process_secondmate() {
   local id=$1 home=$2 window=${3:-} base_mode=$4 nudge_requires_instr=${5:-no} home_real fm_root_real
   local registry=${6:-${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md}
-  local meta=${7:-${FM_STATE_OVERRIDE:-$FM_HOME/state}/$1.meta} code_root code_head target_head base_ref branch
+  local meta=${7:-${FM_STATE_OVERRIDE:-$FM_HOME/state}/$1.meta} code_root code_head native_cwd target_head base_ref branch
   [ -n "$id" ] || return 0
   [ -n "$home" ] || return 0
   fm_root_real=$(resolve_path "$FM_ROOT")
@@ -586,10 +586,14 @@ process_secondmate() {
       return 0
     fi
     code_root=$SECONDMATE_LOCAL_CODE_ROOT
-    if ! secondmate_shared_code_launch_supported \
+    native_cwd=$(secondmate_code_native_cwd_from_meta "$meta") || {
+      echo "secondmate $id: skipped: invalid shared-code native cwd metadata"; return 0;
+    }
+    if ! secondmate_shared_code_native_files "$code_root" "$home_real" "$native_cwd" \
+      || ! secondmate_shared_code_launch_supported \
       "$(awk -F= '$1 == "harness" {print $2}' "$meta")" \
       "$(awk -F= '$1 == "backend" {v=$2} END {print (v == "" ? "tmux" : v)}' "$meta")" \
-      || ! secondmate_shared_code_native_files "$code_root" "$home_real"; then
+      "$SECONDMATE_SHARED_NATIVE_CWD" "$home_real"; then
       echo "secondmate $id: skipped: unsupported shared-code native refresh"
       return 0
     fi

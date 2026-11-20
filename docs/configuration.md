@@ -1367,14 +1367,16 @@ There is no automatic conversion, source adoption, home replacement, new launche
 The root must resolve to the invoking primary's code root, not a task copy or secondmate home, and must be separate from the operational home.
 Ordinary local routes without `root:` retain their existing behavior; remote `host:` routes are unchanged.
 
-The bounded implementation accepts **Pi and pi-signed on tmux only** and refuses other combinations before replacing an existing agent.
-Herdr is deliberately unsupported for this binding: its [agent session identity requirement](herdr-backend.md#agent-status-authority-and-relaunch) needs a verified cross-root context handoff, not an assumed fresh session or silent reuse of old instructions.
-It never changes a configured runtime to get around that refusal.
+The bounded implementation accepts **Pi and pi-signed on tmux**. It also accepts their **Herdr same-home resume contract only for a verified, already-prepared individual-reference view** described below.
+Herdr remains unsupported for the shared-cwd shape: its [agent session identity requirement](herdr-backend.md#agent-status-authority-and-relaunch) is not a cross-root resume capability.
+It never changes a configured runtime to get around a refusal.
 Primary-session handoff and replacement of retained safeguards are not supplied by this setting.
 Source adoption still requires those independent preconditions, owner-scoped preservation, and the selected full validation; a configured path or a custody receipt alone proves none of them.
 
-For the accepted command shape, launch/relaunch keeps `FM_HOME` at the retained home and binds **cwd, native primary extension paths, and `FM_ROOT_OVERRIDE` together** to the explicit code root.
-The parent records `code_root` and the committed source `code_head` at launch; these identify the intended binding, not proof that native supervision ran successfully.
+Launch/relaunch keeps `FM_HOME` at the retained home and binds native primary extension paths and `FM_ROOT_OVERRIDE` to the explicit code root.
+Native cwd is selected independently: the original bounded shape uses the code root, while a verified individual-reference view keeps the operational home.
+The parent records `code_root`, committed source `code_head`, and `code_native_cwd` at launch; these identify the intended binding, not proof that native supervision ran successfully.
+Older activated records without `code_native_cwd` retain their recorded code root as cwd; changing the physical view cannot silently migrate their context.
 Recovery preserves that binding, refuses a contradictory or silently removed route, and may recover it from the recorded binding when the registry itself is absent.
 `fm-home-seed.sh` creates legacy routes and preserves an existing explicit local root when re-seeding; it does not activate or migrate a shared-code installation.
 
@@ -1387,17 +1389,34 @@ That source-only refresh preserves its serialized private data/config selectors 
 Untrusted checks, unknown custom bodies, or mismatched home/state/source bindings remain unchanged and keep that target out of the update's restart set; no arbitrary check is automatically re-trusted.
 Shared-code home retirement is unsupported and refused, including forced descendant cleanup; retain the homes, private project Git administration, external-copy dependencies and unresolved custody records in place.
 
-For the bounded Pi/tmux path, native conversation storage is `<home>/data/pi-sessions`, explicitly selected with `--session-dir` after verifying that the selected executable supports it.
+An **already-prepared individual-reference view** is recognized when the home's `AGENTS.md` points exactly to the selected source's `AGENTS.md` and the complete managed surface passes `secondmate_shared_code_references_valid` in [`fm-secondmate-registry-lib.sh`](../bin/fm-secondmate-registry-lib.sh).
+That owner defines the committed runtime/instruction leaves, including native extensions and their linked `.claude/mods` dependencies.
+Prepared-view verification requires `python3` for one read-only filesystem-metadata walk; a missing interpreter refuses before replacement rather than falling back to another cwd.
+Regular managed files must individually reference their exact source counterparts, with plain containing directories; committed relative source symlinks remain home-relative and must target the covered managed surface.
+In particular, a skill-directory alias still reaches the home's mixed target directory, whose managed files are individually linked: it cannot redirect the whole directory and hide private siblings or inherit source-owner private files.
+The selected committed source surface must be unchanged, and retired tracked managed originals cannot remain active; conflicts, missing/new required references, or a changed recorded cwd refuse rather than mutate files or fall back to another context.
+Private, configured and ancestor resources are not disabled, rewritten or assumed absent.
+
+This view keeps native cwd, native project settings/system prompts, account selection, and the existing native session namespace at the home. It adds neither `--session-dir` nor `--approve`.
+Herdr replacement requires its existing path-backed Pi session registration before stopping the agent. The registered owned, plain session file's first record must be a session header identifying the retained home; only that header candidate is inspected, without traversing or emitting conversation entries. ID-only references, foreign cwd or unreadable/malformed headers refuse without guessing an account/store or rewriting a session. The existing replacement transaction checkpoints that session reference; spawn checks again and refuses even a different same-home reference after the checkpoint. It renders the verified reference with ordinary `--session` and refuses a fresh-session fallback.
+The source-relative module origin can remain the home path under Pi's loader; canonical primary extension arguments and `FM_ROOT_OVERRIDE` still identify maintained code, and the covered relative imports/scripts use the prepared references.
+No reference provisioning, original-file relocation/archive, trust change, configuration merge, history rewrite or live adoption is performed by these checks or launch commands.
+Before preparing a real view, the existing preservation/adoption owner must establish the exact managed-path dispositions, mixed/private and modified-file custody, original bytes outside active discovery, safeguards, source-update coordination and non-overwriting rollback; Git-tracked status alone is not that authority.
+The initial view and any later required reference additions remain separately owned transition work, not an automatic generated mirror. A source update that needs an absent reference leaves that target outside the restart set.
+This does not establish a safe live common-source update: coordinating source advancement, reference upkeep and native replacements remains an independent transition requirement, not a guarantee supplied by recognizing the current file layout.
+Existing native precedence and resource exclusions remain in force; this preflight is not proof that every managed resource actually loaded or that a private selector still names a supported entrypoint.
+
+For the original **shared-cwd Pi/tmux shape**, native conversation storage is `<home>/data/pi-sessions`, explicitly selected with `--session-dir` after verifying that the selected executable supports it.
 The directory is created owner-only (`0700`); an existing symlink, unsafe ownership/permissions, or writable parent is refused rather than repaired, including before a replacement stops its existing agent.
 This separates conversation storage without changing `PI_CODING_AGENT_DIR`, account selection or credential storage.
 Old sessions are retained in place, not moved, merged or rewritten.
-The existing native preflight refuses `.pi/settings.json`, `.pi/mcp.json`, `.pi/SYSTEM.md` or `.pi/APPEND_SYSTEM.md` at either the retained home or shared root because no per-home mapping for those cwd-bound files is implemented.
+For that shared-cwd shape, the native preflight refuses `.pi/settings.json`, `.pi/mcp.json`, `.pi/SYSTEM.md` or `.pi/APPEND_SYSTEM.md` at either the retained home or shared root because no per-home mapping for those cwd-bound files is implemented.
 It checks presence only, including dangling pointers, without reading values, copying files or treating equal bytes as equivalent relative resource paths.
 A non-directory or symlinked `.pi` is also refused before an existing agent is stopped or a refresh target is marked settled.
 This is not a complete resource/extension ownership check, a native settings migration or a same-session cross-root resume capability; those acceptance requirements still apply.
 
 [`tests/fm-shared-code.test.sh`](../tests/fm-shared-code.test.sh) executes rendered command suffixes with shell-only fake Pi executables for four separate homes.
-It also checks retained in-home project Git administration, nine external copies, an unmerged index, private queues and unresolved dual-claim records without repairing or relocating them.
+It also checks prepared individual-reference rendering, unchanged private settings and mixed directories, required same-session registration, retained in-home project Git administration, nine external copies, an unmerged index, private queues and unresolved dual-claim records without repairing or relocating them.
 The existing [replacement](../tests/fm-control-relaunch.test.sh), [sync](../tests/fm-secondmate-sync.test.sh), [update](../tests/fm-update.test.sh), [consumer registration](../tests/fm-contributions-arm.test.sh), and [preservation](../tests/fm-secondmate-safety.test.sh) suites exercise their corresponding owners.
 These are synthetic support tests, **not live native-runtime, backend, safeguard-equivalence, backup-completeness, or primary-handoff acceptance evidence**.
 
