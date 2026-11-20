@@ -282,6 +282,9 @@ PR_NUMBER=$FM_PR_NUMBER
 # per-call host handling.
 if [ "$PROVIDER" = github ]; then
   fm_pr_github_host_export "$PR_HOST"
+  if [ "$PR_HOST" = github.com ]; then
+    "$SCRIPT_DIR/fm-upstream-write-guard.sh" check gh pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" || exit $?
+  fi
 fi
 # glab resolves the instance from the project URL passed to -R, so the host is
 # rebuilt from the parsed identity rather than read from any ambient default.

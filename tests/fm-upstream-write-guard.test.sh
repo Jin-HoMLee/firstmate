@@ -50,6 +50,18 @@ expect_allowed() {
 expect_allowed gh-axi pr view 48 -R kunchenguid/dotfiles
 expect_allowed gh pr view 48 --repo kunchenguid/dotfiles
 expect_allowed gh-axi api GET /repos/kunchenguid/dotfiles/pulls/48
+expect_allowed gh api --method GET /repos/kunchenguid/dotfiles/commits -f sha=main -f path=bin -F per_page=100
+expect_allowed gh api /repos/kunchenguid/dotfiles/commits -f sha=main -F per_page=100 --method GET
+expect_allowed gh api /repos/kunchenguid/dotfiles/commits --method=GET --field=sha=main
+expect_allowed gh api /repos/kunchenguid/dotfiles/commits -XGET -fsha=main
+expect_allowed gh api /repos/kunchenguid/dotfiles/commits -fsha=main -X get
+expect_allowed gh api /repos/kunchenguid/dotfiles/commits --method HEAD --raw-field=sha=main
+expect_allowed gh api /repos/kunchenguid/dotfiles/commits --method GET --input /dev/null
+expect_allowed gh-axi api GET /repos/kunchenguid/dotfiles/commits -f sha=main
+expect_refused gh api /repos/kunchenguid/dotfiles/issues -f title=test
+expect_refused gh api /repos/kunchenguid/dotfiles/issues --field=title=test
+expect_refused gh api /repos/kunchenguid/dotfiles/issues -ftitle=test
+expect_allowed gh api /repos/Jin-HoMLee/dotfiles/issues -f title=intended
 pass "read-only protected-upstream operations remain available"
 
 expect_allowed gh api -X POST /user
@@ -562,6 +574,34 @@ FM_TASK_ID=worker FM_HOME="$AUTH_HOME" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/us
 assert_contains "$(cat "$TMP_ROOT/worker.err")" "workers cannot authorize" \
   "worker refusal did not name the authority boundary"
 pass "the only override is exact, audited, and unavailable to workers"
+
+audit_stubs="$TMP_ROOT/audit-stubs"
+mkdir -p "$audit_stubs"
+cat >"$audit_stubs/gh" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_TEST_FORGE_MARKER"
+SH
+chmod +x "$audit_stubs/gh"
+for failure in directory record; do
+  failed_home="$TMP_ROOT/audit-failure-$failure"
+  marker="$TMP_ROOT/audit-executed-$failure"
+  mkdir -p "$failed_home/state"
+  if [ "$failure" = directory ]; then
+    : >"$failed_home/state/upstream-write-authorizations"
+  else
+    mkdir -p "$failed_home/state/upstream-write-authorizations"
+  fi
+  status=0
+  (
+    if [ "$failure" = record ]; then ulimit -c 0; ulimit -f 0; fi
+    FM_HOME="$failed_home" FM_TEST_FORGE_MARKER="$marker" PATH="$audit_stubs:/usr/bin:/bin" \
+      "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$words" -- \
+      gh issue create -R kunchenguid/dotfiles --title test
+  ) >"$TMP_ROOT/audit-$failure.out" 2>"$TMP_ROOT/audit-$failure.err" || status=$?
+  [ "$status" -ne 0 ] || fail "authorization should fail when audit $failure fails"
+  [ ! -e "$marker" ] || fail "the forge executed after audit $failure failed"
+done
+pass "audit directory and record failures stop before the real tool executes"
 
 : >"$LOG"
 status=0
