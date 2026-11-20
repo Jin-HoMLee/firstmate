@@ -1,0 +1,291 @@
+
+=== reference-overridden-data ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-overridden-data/routing-data bin/fm-update.sh
+firstmate: skipped: shared-code lifecycle action is in progress for shared
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=2f2004ed8247f02669e905b306f19f1c372efe1c
+source_HEAD_after=2f2004ed8247f02669e905b306f19f1c372efe1c
+retained_home_HEAD=2f2004ed8247f02669e905b306f19f1c372efe1c
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-overridden-data/main/AGENTS.md
+launch_metadata=absent
+
+=== reference-overridden-data ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-overridden-data/routing-data bin/fm-update.sh
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=2f2004ed8247f02669e905b306f19f1c372efe1c
+source_HEAD_after=2f2004ed8247f02669e905b306f19f1c372efe1c
+retained_home_HEAD=2f2004ed8247f02669e905b306f19f1c372efe1c
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-overridden-data/main/AGENTS.md
+launch_metadata=absent
+
+=== reference-malformed-missing-date ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: shared-code binding cannot be verified: malformed secondmate registry entry: - shared - synthetic (root: /Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-malformed-missing-date/main; home: /Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-malformed-missing-date/shared; scope: test; projects: none)
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=3464e74aed2b070611311cd3c2e79dd9aa50fc60
+source_HEAD_after=3464e74aed2b070611311cd3c2e79dd9aa50fc60
+retained_home_HEAD=3464e74aed2b070611311cd3c2e79dd9aa50fc60
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-malformed-missing-date/main/AGENTS.md
+launch_metadata=absent
+
+=== reference-malformed-truncated ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: shared-code binding cannot be verified: malformed secondmate registry entry: - shared
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=16f8bab57320b973abced96e7f9b075118202614
+source_HEAD_after=16f8bab57320b973abced96e7f9b075118202614
+retained_home_HEAD=16f8bab57320b973abced96e7f9b075118202614
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-malformed-truncated/main/AGENTS.md
+launch_metadata=absent
+
+=== registry-prose ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: updated 7002df6..e86fc1e (instructions changed: AGENTS.md, bin, .agents/skills)
+no watches registered
+reread-firstmate: yes
+restart-secondmates: none
+nudge-secondmates: none
+exit=0
+source_HEAD_before=7002df69d1a5f35e989c935be830ad543230fd7e
+source_HEAD_after=e86fc1eeb70852eea520d3e7619c0138ac5b15a7
+
+=== reference-content ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: updated aaf0ad2..e820b3e (instructions changed: AGENTS.md, bin, .agents/skills)
+no watches registered
+secondmate shared: shared code current; native refresh belongs to the restart owner; retained home untouched
+reread-firstmate: yes
+restart-secondmates: fm-shared
+nudge-secondmates: none
+exit=0
+source_HEAD_before=aaf0ad23f1012bc6ebb6eb5eb5b05c05cd129293
+source_HEAD_after=e820b3eb84bd5e5e1f84c8eeafbabb30ad453503
+retained_home_HEAD=aaf0ad23f1012bc6ebb6eb5eb5b05c05cd129293
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-content/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-content/main
+code_head=aaf0ad23f1012bc6ebb6eb5eb5b05c05cd129293
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-content/shared
+
+=== reference-added ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+self-update source: origin main (config/self-update-source)
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=3e41cfcf5d48b81d33b75361bf49c59a7cf2dbd9
+source_HEAD_after=3e41cfcf5d48b81d33b75361bf49c59a7cf2dbd9
+retained_home_HEAD=3e41cfcf5d48b81d33b75361bf49c59a7cf2dbd9
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-added/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-added/main
+code_head=3e41cfcf5d48b81d33b75361bf49c59a7cf2dbd9
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-added/shared
+
+=== reference-removed ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=5b4fcd6e0d86112fe52c015ab22313c45f617aa9
+source_HEAD_after=5b4fcd6e0d86112fe52c015ab22313c45f617aa9
+retained_home_HEAD=5b4fcd6e0d86112fe52c015ab22313c45f617aa9
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-removed/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-removed/main
+code_head=5b4fcd6e0d86112fe52c015ab22313c45f617aa9
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-removed/shared
+
+=== reference-type ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=76fa5e20d1f6d3ed3d3a37974bff6b91674f5756
+source_HEAD_after=76fa5e20d1f6d3ed3d3a37974bff6b91674f5756
+retained_home_HEAD=76fa5e20d1f6d3ed3d3a37974bff6b91674f5756
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-type/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-type/main
+code_head=76fa5e20d1f6d3ed3d3a37974bff6b91674f5756
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-type/shared
+
+=== reference-alias ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=dec2fb838bd315917589a62031db56114c3c9add
+source_HEAD_after=dec2fb838bd315917589a62031db56114c3c9add
+retained_home_HEAD=dec2fb838bd315917589a62031db56114c3c9add
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-alias/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-alias/main
+code_head=dec2fb838bd315917589a62031db56114c3c9add
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-alias/shared
+
+=== reference-unreadable ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=370c814939bc05afaea6ee65d27c2a652fb486db
+source_HEAD_after=370c814939bc05afaea6ee65d27c2a652fb486db
+retained_home_HEAD=370c814939bc05afaea6ee65d27c2a652fb486db
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-unreadable/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-unreadable/main
+code_head=370c814939bc05afaea6ee65d27c2a652fb486db
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-unreadable/shared
+
+=== reference-coordination ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: shared-code lifecycle action is in progress for shared
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=6793920eea4af12b026198270b1b47653ccc03fa
+source_HEAD_after=6793920eea4af12b026198270b1b47653ccc03fa
+retained_home_HEAD=6793920eea4af12b026198270b1b47653ccc03fa
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-coordination/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-coordination/main
+code_head=6793920eea4af12b026198270b1b47653ccc03fa
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-coordination/shared
+
+=== reference-coordination ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: updated 6793920..549226c (instructions changed: AGENTS.md, bin, .agents/skills)
+no watches registered
+secondmate shared: shared code current; native refresh belongs to the restart owner; retained home untouched
+reread-firstmate: yes
+restart-secondmates: fm-shared
+nudge-secondmates: none
+exit=0
+source_HEAD_before=6793920eea4af12b026198270b1b47653ccc03fa
+source_HEAD_after=549226c27b903630ad1d83578f844bfcd241b65d
+retained_home_HEAD=6793920eea4af12b026198270b1b47653ccc03fa
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-coordination/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-coordination/main
+code_head=6793920eea4af12b026198270b1b47653ccc03fa
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-coordination/shared
+
+=== reference-registry-only ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: managed reference layout is changed or unverifiable; a separately authorized transition is required before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+source_HEAD_after=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+retained_home_HEAD=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-registry-only/main/AGENTS.md
+launch_metadata=absent
+
+=== reference-registry-only ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: shared-code binding cannot be verified: duplicate secondmate home assignment: local:/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-registry-only/shared: shared, shared
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+source_HEAD_after=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+retained_home_HEAD=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-registry-only/main/AGENTS.md
+launch_metadata=absent
+
+=== reference-registry-only ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: shared-code registry cannot be read safely before source advancement
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+source_HEAD_after=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+retained_home_HEAD=1a2f9926c19f83363eaf7e788e54a97f3d21fd89
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-registry-only/main/AGENTS.md
+launch_metadata=absent
+
+=== reference-view-conflict ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: skipped: shared-code native view cannot be verified for shared
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=1
+source_HEAD_before=007d6bfb1de8b1d17a0fda784cb67b3bc1451760
+source_HEAD_after=007d6bfb1de8b1d17a0fda784cb67b3bc1451760
+retained_home_HEAD=007d6bfb1de8b1d17a0fda784cb67b3bc1451760
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-view-conflict/main/AGENTS.md
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-view-conflict/main
+code_head=007d6bfb1de8b1d17a0fda784cb67b3bc1451760
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/reference-view-conflict/shared
+
+=== shared-code-update ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/shared-code-update/home/data bin/fm-update.sh
+firstmate: updated 337fce3..b003284 (instructions changed: bin)
+no watches registered
+secondmate shared: shared code current; native refresh belongs to the restart owner; retained home untouched
+registered: state/contributions.check.sh
+reread-firstmate: yes
+restart-secondmates: fm-shared
+nudge-secondmates: none
+exit=0
+source_HEAD_before=337fce3a85761f746c2ea7fbab4d3df6554b0392
+source_HEAD_after=b00328493aa5f281293dd949752cda60e7004123
+retained_home_HEAD=337fce3a85761f746c2ea7fbab4d3df6554b0392
+AGENTS_reference=
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/shared-code-update/main
+code_head=337fce3a85761f746c2ea7fbab4d3df6554b0392
+
+=== shared-code-update ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: already current
+secondmate shared: shared code current; native refresh belongs to the restart owner; retained home untouched
+registered: state/contributions.check.sh
+reread-firstmate: no
+restart-secondmates: fm-shared
+nudge-secondmates: none
+exit=0
+source_HEAD_before=b00328493aa5f281293dd949752cda60e7004123
+source_HEAD_after=b00328493aa5f281293dd949752cda60e7004123
+retained_home_HEAD=337fce3a85761f746c2ea7fbab4d3df6554b0392
+AGENTS_reference=
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/shared-code-update/main
+code_head=b00328493aa5f281293dd949752cda60e7004123
+
+=== shared-code-update ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: already current
+secondmate shared: shared code current; native refresh belongs to the restart owner; retained home untouched
+secondmate shared: skipped: existing contribution check could not refresh from shared source; retained artifacts preserved
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+exit=0
+source_HEAD_before=b00328493aa5f281293dd949752cda60e7004123
+source_HEAD_after=b00328493aa5f281293dd949752cda60e7004123
+retained_home_HEAD=337fce3a85761f746c2ea7fbab4d3df6554b0392
+AGENTS_reference=
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.VS5stQ/shared-code-update/main
+code_head=b00328493aa5f281293dd949752cda60e7004123

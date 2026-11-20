@@ -1,0 +1,112 @@
+Synthetic command-rendering evidence only: shell-only Pi/tmux doubles, no live agent or service.
+
+=== four homes ===
+
+Parent launch record sm1.meta
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm1
+worktree=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm1
+harness=pi
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+code_head=07347a3f89bb7ef96d0857d739f053dfabef4677
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+retained_HEAD=f0bab6d03393ffd14f384d6a4c520e81380d8d3d
+retained_instruction_bytes='retained old instruction\nunfinished tracked work\n'
+private_data='sm1-private\n'
+private_configuration='sm1-configuration\n'
+
+Parent launch record sm2.meta
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm2
+worktree=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm2
+harness=pi
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+code_head=07347a3f89bb7ef96d0857d739f053dfabef4677
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+retained_HEAD=f0bab6d03393ffd14f384d6a4c520e81380d8d3d
+retained_instruction_bytes='retained old instruction\nunfinished tracked work\n'
+private_data='sm2-private\n'
+private_configuration='sm2-configuration\n'
+
+Parent launch record sm3.meta
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm3
+worktree=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm3
+harness=pi-signed
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+code_head=07347a3f89bb7ef96d0857d739f053dfabef4677
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+retained_HEAD=f0bab6d03393ffd14f384d6a4c520e81380d8d3d
+retained_instruction_bytes='retained old instruction\nunfinished tracked work\n'
+private_data='sm3-private\n'
+private_configuration='sm3-configuration\n'
+
+Parent launch record sm4.meta
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm4
+worktree=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm4
+harness=pi-signed
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+code_head=07347a3f89bb7ef96d0857d739f053dfabef4677
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+retained_HEAD=f0bab6d03393ffd14f384d6a4c520e81380d8d3d
+retained_instruction_bytes='retained old instruction\nunfinished tracked work\n'
+private_data='sm4-private\n'
+private_configuration='sm4-configuration\n'
+
+Last executed native-command suffix response:
+cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm4
+root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code
+harness=pi-signed
+account_dir=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/selected-account
+--session-dir
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/sm4/data/pi-sessions
+--tui-mode
+regular
+--approve
+-e
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code/.pi/extensions/fm-primary-turnend-guard.ts
+-e
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/code/.pi/extensions/fm-primary-pi-watch.ts
+-e
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/four homes/parent/state/sm4.pi-ext.ts
+⁣FIRSTMATE_OP: v1 launch-brief: charter for sm4
+
+=== prepared references ===
+
+Parent launch record sm1.meta
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm1
+worktree=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm1
+harness=pi
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/code
+code_head=6495d17078da41c10e01005d0d06353a4c8200a5
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm1
+retained_HEAD=45ba4d8b81f2849ed0cdde629e6a2e079a2d67ca
+retained_instruction_bytes='retained old instruction\nunfinished tracked work\n'
+private_data='sm1-private\n'
+private_configuration='sm1-configuration\n'
+
+Parent launch record sm2.meta
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm2
+worktree=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm2
+harness=pi-signed
+code_root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/code
+code_head=6495d17078da41c10e01005d0d06353a4c8200a5
+code_native_cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm2
+retained_HEAD=bfe225ff511c8c7567a927b85384c117df76886b
+retained_instruction_bytes='retained old instruction\nunfinished tracked work\n'
+private_data='sm2-private\n'
+private_configuration='sm2-configuration\n'
+
+Last executed native-command suffix response:
+cwd=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm2
+home=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/sm2
+root=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/code
+harness=pi-signed
+account_dir=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/selected-account
+--tui-mode
+regular
+-e
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/code/.pi/extensions/fm-primary-turnend-guard.ts
+-e
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/code/.pi/extensions/fm-primary-pi-watch.ts
+-e
+/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-shared-code.sUZh1T/prepared references/parent/state/sm2.pi-ext.ts
+⁣FIRSTMATE_OP: v1 launch-brief: charter for sm2

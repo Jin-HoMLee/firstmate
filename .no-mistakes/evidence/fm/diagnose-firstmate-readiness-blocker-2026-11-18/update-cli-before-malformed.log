@@ -1,0 +1,14 @@
+
+=== reference-malformed-missing-date ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=unset bin/fm-update.sh
+firstmate: updated b9464f6..f826e63 (instructions changed: bin)
+no watches registered
+reread-firstmate: yes
+restart-secondmates: none
+nudge-secondmates: none
+exit=0
+source_HEAD_before=b9464f6fa24570218f2cf27bf65e4d2509ae9a55
+source_HEAD_after=f826e63cbe6498a564a94cac6caabb3507f49a35
+retained_home_HEAD=b9464f6fa24570218f2cf27bf65e4d2509ae9a55
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.u5adeo/reference-malformed-missing-date/main/AGENTS.md
+launch_metadata=absent

@@ -1,0 +1,14 @@
+
+=== reference-overridden-data ===
+command: FM_HOME=<fixture>/home FM_ROOT_OVERRIDE=<fixture>/main FM_DATA_OVERRIDE=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.XEQE1p/reference-overridden-data/routing-data bin/fm-update.sh
+firstmate: updated 66ea8da..be82078 (instructions changed: bin)
+no watches registered
+reread-firstmate: yes
+restart-secondmates: none
+nudge-secondmates: none
+exit=0
+source_HEAD_before=66ea8da6640df44b2970212cfba68825ffb94d51
+source_HEAD_after=be820789f1453b21bc6276e2325401d5174abc4d
+retained_home_HEAD=66ea8da6640df44b2970212cfba68825ffb94d51
+AGENTS_reference=/Users/jin-holee/.no-mistakes/worktrees/6810fa9ca453/01M7WABRMAXE1T7J3D2NWZ0YME/.nm-test-tmp/fm-update-tests.XEQE1p/reference-overridden-data/main/AGENTS.md
+launch_metadata=absent
