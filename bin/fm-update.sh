@@ -30,6 +30,13 @@
 # launch code_head is NOT rewritten by this planning pass; the ordinary
 # correlated persistence/restart owner must refresh native context. Unsupported
 # bindings are skipped, never converted back to legacy home-source updates.
+# Before advancing the primary source, validate its registered local shared
+# consumers and hold their existing per-task lifecycle locks through the update.
+# A prepared reference view permits content-only advances, not a changed managed
+# path/type/relative-alias layout. Such a change requires separately authorized
+# reference upkeep: refuse before source bytes move, without preparing links or
+# claiming a settled/restartable old target. This guard covers this home's direct
+# reports and declared local routes; it never discovers another home's children.
 # Local legacy homes are treehouse worktrees or standalone clones; remote routes update
 # their configured code root on that host and then fast-forward the persistent
 # home to that root. FAST-FORWARD ONLY, exactly like
@@ -118,6 +125,18 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 fi
 [ $# -eq 0 ] || { usage; exit 1; }
 
+# A shared-code secondmate does not own the maintained source or its sibling
+# inventory. Route the update to its primary instead of inspecting another
+# home's private records or publishing through an incomplete local registry.
+if { [ -e "$FM_HOME/$SUB_HOME_MARKER" ] || [ -L "$FM_HOME/$SUB_HOME_MARKER" ]; } \
+  && [ "$(resolve_path "$FM_HOME")" != "$(resolve_path "$FM_ROOT")" ]; then
+  echo 'firstmate: skipped: shared source update belongs to the owning primary; retained home untouched'
+  echo 'reread-firstmate: no'
+  echo 'restart-secondmates: none'
+  echo 'nudge-secondmates: none'
+  exit 1
+fi
+
 # --- self-update source ----------------------------------------------------
 
 SELF_UPDATE_SOURCE_FILE="$FM_HOME/config/self-update-source"
@@ -166,6 +185,100 @@ EOF
 
 read_self_update_source
 
+# The existing task control locks also serialize source publication with native
+# replacement. Do not introduce another lifecycle owner or a reference writer.
+UPDATE_SHARED_LOCKS=()
+UPDATE_SHARED_SEEN=""
+UPDATE_SHARED_VIEWS=0
+UPDATE_SHARED_REFUSED=0
+update_shared_release() {
+  local lock
+  if [ "${#UPDATE_SHARED_LOCKS[@]}" -gt 0 ]; then
+    for lock in "${UPDATE_SHARED_LOCKS[@]}"; do
+      fm_lock_release "$lock" || true
+    done
+  fi
+  UPDATE_SHARED_LOCKS=()
+}
+trap update_shared_release EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+update_shared_candidate() {  # <id> <home> <metadata> [declared-root]
+  local id=$1 home=$2 meta=$3 declared=${4:-} recorded native lock
+  case " $UPDATE_SHARED_SEEN " in *" $id "*) return 0 ;; esac
+  recorded=$(secondmate_code_root_from_meta "$meta") || {
+    FF_ADVANCE_ERROR="invalid shared-code metadata for $id"; return 1;
+  }
+  if [ -z "$declared" ]; then
+    declared=$(secondmate_registry_field "$SECONDMATES_MD" "$id" root 2>/dev/null || true)
+  fi
+  [ -n "$recorded$declared" ] || return 0
+  case "$id" in ''|*[!A-Za-z0-9._-]*) FF_ADVANCE_ERROR='invalid shared-code task identity'; return 1 ;; esac
+  if ! validate_secondmate_home "$id" "$home" \
+    || ! secondmate_local_code_binding "$SECONDMATES_MD" "$id" "$VALIDATED_HOME" "$FM_ROOT" "$recorded"; then
+    FF_ADVANCE_ERROR="shared-code binding cannot be verified for $id"
+    return 1
+  fi
+  home=$VALIDATED_HOME
+  if ! type fm_lock_try_acquire >/dev/null 2>&1; then
+    # shellcheck source=bin/fm-wake-lib.sh
+    . "$SCRIPT_DIR/fm-wake-lib.sh"
+  fi
+  lock="$STATE/.control-$id.lock"
+  if ! fm_lock_try_acquire "$lock"; then
+    FF_ADVANCE_ERROR="shared-code lifecycle action is in progress for $id"
+    return 1
+  fi
+  UPDATE_SHARED_LOCKS+=("$lock")
+  UPDATE_SHARED_SEEN="$UPDATE_SHARED_SEEN $id"
+  # A requested but unlaunched route is not activated here. Its lock protects
+  # first launch too; only an already prepared view needs layout preservation.
+  if [ -n "$recorded" ] \
+    || { [ -L "$home/AGENTS.md" ] && [ "$(readlink "$home/AGENTS.md")" = "$SECONDMATE_LOCAL_CODE_ROOT/AGENTS.md" ]; }; then
+    native=$(secondmate_code_native_cwd_from_meta "$meta") || {
+      FF_ADVANCE_ERROR="invalid shared-code native cwd for $id"; return 1;
+    }
+    if ! secondmate_shared_code_native_files "$SECONDMATE_LOCAL_CODE_ROOT" "$home" "$native"; then
+      FF_ADVANCE_ERROR="shared-code native view cannot be verified for $id"
+      return 1
+    fi
+    [ "$SECONDMATE_SHARED_NATIVE_CWD" != "$home" ] || UPDATE_SHARED_VIEWS=1
+  fi
+}
+
+# ff_target calls this with its immutable prospective commit before publication.
+# Legacy local/remote routes remain on their existing paths. Missing registry
+# recovery still follows activated metadata rather than silently unbinding it.
+fm_ff_before_advance() {
+  local dir=$1 target=$2 id home window meta line
+  [ "$dir" = "$FM_ROOT" ] || return 0
+  while IFS='|' read -r id home window meta; do
+    if grep -q '^remote_host=.' "$meta" 2>/dev/null; then continue; fi
+    if ! update_shared_candidate "$id" "$home" "$meta"; then
+      UPDATE_SHARED_REFUSED=1
+      return 1
+    fi
+  done < <(live_secondmate_meta_records "$STATE" "$SECONDMATES_MD")
+  if [ -f "$SECONDMATES_MD" ] && [ ! -L "$SECONDMATES_MD" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      secondmate_registry_parse_line "$line" || continue
+      [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] && [ -n "$SECONDMATE_REGISTRY_ROOT" ] || continue
+      id=$SECONDMATE_REGISTRY_ID
+      if ! update_shared_candidate "$id" "$SECONDMATE_REGISTRY_HOME" "$STATE/$id.meta" "$SECONDMATE_REGISTRY_ROOT"; then
+        UPDATE_SHARED_REFUSED=1
+        return 1
+      fi
+    done < "$SECONDMATES_MD"
+  fi
+  if [ "$UPDATE_SHARED_VIEWS" = 1 ] \
+    && ! secondmate_shared_code_same_reference_shape "$dir" HEAD "$target"; then
+    FF_ADVANCE_ERROR='managed reference layout would change; authorized reference upkeep is required before source advancement'
+    UPDATE_SHARED_REFUSED=1
+    return 1
+  fi
+}
+
 # --- main firstmate repo ---------------------------------------------------
 
 reread_firstmate="no"
@@ -182,6 +295,15 @@ if [ -n "$SELF_UPDATE_REMOTE" ]; then
   fi
 else
   ff_target "$FM_ROOT" "firstmate" origin no no
+fi
+if [ "$UPDATE_SHARED_REFUSED" = 1 ]; then
+  echo 'reread-firstmate: no'
+  echo 'restart-secondmates: none'
+  echo 'nudge-secondmates: none'
+  exit 1
+fi
+if [ "$FF_STATUS" = updated ] || [ "$FF_STATUS" = current ]; then
+  FF_SHARED_CODE_TARGET=$(git -C "$FM_ROOT" rev-parse --verify 'HEAD^{commit}') || exit 1
 fi
 if [ "$FF_STATUS" = "updated" ]; then
   if [ -n "$FF_INSTR" ]; then

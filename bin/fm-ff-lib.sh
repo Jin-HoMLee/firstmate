@@ -387,10 +387,17 @@ live_secondmate_meta_records() {
 # Guards are identical in both modes: never force/merge/stash; skip a dirty or
 # wrong-branch target and leave its work untouched. An optional secondmate id
 # enables the content-equivalent divergence proof and durable marker described
-# in this file's header.
+# in this file's header. An optional fm_ff_before_advance <dir> <target-commit>
+# hook may refuse before mutation, setting FF_ADVANCE_ERROR for the status line.
+# The resolved commit, not a moving remote ref, is the eventual merge target.
 FF_STATUS=""
 FF_INSTR=""
 FF_IMPORT_FROM=""
+FF_ADVANCE_ERROR=""
+# The update owner pins the shared source's successfully selected commit. Other
+# sweeps leave this empty and resolve their normal caller-supplied base.
+FF_SHARED_CODE_TARGET=""
+
 ff_target() {
   local dir=$1 label=$2 base_mode=$3 allow_detached=${4:-no} ignore_seed_marker=${5:-no}
   local secondmate_id=${6:-} reconciliation_state=${7:-}
@@ -455,7 +462,7 @@ ff_target() {
     echo "$label: skipped: cannot read HEAD"
     return 0
   }
-  base_rev=$(git -C "$dir" rev-parse "$base" 2>/dev/null) || {
+  base_rev=$(git -C "$dir" rev-parse --verify "$base^{commit}" 2>/dev/null) || {
     echo "$label: skipped: cannot read $base"
     return 0
   }
@@ -465,12 +472,18 @@ ff_target() {
     echo "$label: already current"
     return 0
   fi
-  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+  FF_ADVANCE_ERROR=
+  if type fm_ff_before_advance >/dev/null 2>&1 \
+    && ! fm_ff_before_advance "$dir" "$base_rev"; then
+    echo "$label: skipped: ${FF_ADVANCE_ERROR:-update preflight refused}"
+    return 0
+  fi
+  if ! git -C "$dir" merge-base --is-ancestor HEAD "$base_rev" 2>/dev/null; then
     if [ -n "$secondmate_id" ] && [ -n "$reconciliation_state" ] \
       && divergence_is_redundant "$dir" "$local_rev" "$base_rev"; then
-      instr=$(changed_instr "$dir" "$base")
+      instr=$(changed_instr "$dir" "$base_rev")
       before=$(git -C "$dir" rev-parse --short HEAD)
-      if git -C "$dir" reset --keep "$base" >/dev/null 2>&1; then
+      if git -C "$dir" reset --keep "$base_rev" >/dev/null 2>&1; then
         after=$(git -C "$dir" rev-parse --short HEAD)
         FF_STATUS="updated"
         FF_INSTR="$instr"
@@ -498,9 +511,9 @@ ff_target() {
     return 0
   fi
 
-  instr=$(changed_instr "$dir" "$base")
+  instr=$(changed_instr "$dir" "$base_rev")
   before=$(git -C "$dir" rev-parse --short HEAD)
-  if ! out=$(git -C "$dir" merge --ff-only "$base" 2>&1); then
+  if ! out=$(git -C "$dir" merge --ff-only "$base_rev" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
     return 0
   fi
@@ -602,8 +615,8 @@ process_secondmate() {
       echo "secondmate $id: skipped: shared-code launch HEAD is unavailable"
       return 0
     fi
-    base_ref=$base_mode
-    if [ "$base_mode" = origin ]; then
+    base_ref=${FF_SHARED_CODE_TARGET:-$base_mode}
+    if [ "$base_ref" = origin ]; then
       branch=$(default_branch "$code_root") || return 0
       base_ref="refs/remotes/origin/$branch"
     fi

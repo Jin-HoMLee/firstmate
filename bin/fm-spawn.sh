@@ -4201,6 +4201,17 @@ if [ "$KIND" = secondmate ]; then
   fi
   SECONDMATE_CODE_ROOT=$SECONDMATE_LOCAL_CODE_ROOT
   if [ -n "$SECONDMATE_CODE_ROOT" ]; then
+    # The update owner holds this same task lock while publishing shared code.
+    # Relaunch already owns/inherits it; first activation must serialize too,
+    # before validating the view or launching against bytes that can advance.
+    if [ "$SPAWN_CONTROL_PARENT" = 0 ] && [ "$SPAWN_CONTROL_LOCK_HELD" = 0 ]; then
+      SPAWN_CONTROL_LOCK="$STATE/.control-$ID.lock"
+      if ! fm_lock_try_acquire "$SPAWN_CONTROL_LOCK"; then
+        echo "error: shared-code source update or lifecycle action is in progress for $ID" >&2
+        exit 1
+      fi
+      SPAWN_CONTROL_LOCK_HELD=1
+    fi
     [ "$RAW_LAUNCH" = 0 ] || { echo 'error: shared-code secondmates require a verified runtime, not a raw command' >&2; exit 1; }
     recorded_native_cwd=$(secondmate_code_native_cwd_from_meta "$STATE/$ID.meta") || {
       echo 'error: invalid shared-code native cwd metadata' >&2; exit 1;

@@ -541,6 +541,25 @@ test_reference_resume_uses_verified_existing_identity() (
   pass 'reference-view resume requires the existing Pi registration and never fabricates a fresh-session fallback'
 )
 
+test_shared_first_activation_respects_the_update_lock() {
+  local w lock rc=0
+  w=$(new_shared_world 'first activation update exclusion')
+  add_retained_home "$w" sm
+  prepare_fixture_reference_view "$w" "$w/sm"
+  lock="$w/parent/state/.control-sm.lock"
+  mkdir "$lock"
+  printf '%s\n' "$$" > "$lock/pid"
+  shared_spawn "$w" sm pi > "$w/update-refusal.log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail 'first shared activation ignored source-update exclusion'
+  assert_grep 'shared-code source update or lifecycle action is in progress' "$w/update-refusal.log" 'first activation names its existing-owner conflict'
+  [ ! -e "$w/windows" ] || fail 'endpoint created while the update owns the lifecycle lock'
+  [ ! -e "$w/parent/state/sm.meta" ] || fail 'activation recorded while source publication was in progress'
+  assert_equals "$$" "$(cat "$lock/pid")" 'refusal never releases the other owner'
+  assert_equals "$w/code/AGENTS.md" "$(readlink "$w/sm/AGENTS.md")" 'prepared references stay unchanged'
+  assert_grep 'private aliased-directory content' "$w/sm/.claude/mods/linked/private-note.txt" 'private siblings stay unchanged'
+  pass 'first shared activation uses the existing lifecycle lock before validating or launching maintained code'
+}
+
 test_local_shared_registry_is_explicit_and_disjoint
 test_binding_is_sticky_and_recorded_recovery_is_scoped
 test_binding_metadata_is_unambiguous
@@ -551,5 +570,6 @@ test_native_project_configuration_is_not_silently_retargeted
 test_retained_project_admin_and_unresolved_custody_are_not_relocated
 test_missing_native_source_refuses_before_endpoint_creation
 test_prepared_reference_view_keeps_native_home_and_private_semantics
+test_shared_first_activation_respects_the_update_lock
 test_incomplete_reference_view_preserves_conflicting_originals
 test_reference_resume_uses_verified_existing_identity

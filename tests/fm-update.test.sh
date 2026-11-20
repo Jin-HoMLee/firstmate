@@ -792,6 +792,228 @@ SH
 
 }
 
+# Only fresh fixture originals are moved here, never an installation. The
+# update owner must recognize this completed view, not prepare or repair it.
+new_reference_update_world() {
+  local w path home
+  w=$(new_world "$1")
+  mkdir -p "$w/seed/.pi/extensions" "$w/seed/.claude/mods/linked" "$w/seed/.claude/mods/other"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$w/seed/bin/fm-session-start.sh"
+  printf 'synthetic extension\n' > "$w/seed/.pi/extensions/fm-primary-pi-watch.ts"
+  printf 'synthetic guard\n' > "$w/seed/.pi/extensions/fm-primary-turnend-guard.ts"
+  printf 'linked skill\n' > "$w/seed/.claude/mods/linked/SKILL.md"
+  printf 'other skill\n' > "$w/seed/.claude/mods/other/SKILL.md"
+  ln -s ../../.claude/mods/linked "$w/seed/.agents/skills/linked"
+  printf '.fm-secondmate-home\ndata/\nstate/\nconfig/\nprojects/\n' > "$w/seed/.gitignore"
+  git -C "$w/seed" add -A
+  git -C "$w/seed" commit -qm 'synthetic reference layout'
+  git -C "$w/seed" push -q origin main
+  git -C "$w/main" pull -q --ff-only
+  add_sm "$w" shared pi
+  home="$w/shared"
+  mkdir -p "$home/data/reference-originals" "$home/state" "$home/config" "$home/projects"
+  while IFS= read -r -d '' path; do
+    [ "$path" != .gitignore ] || continue
+    mkdir -p "$home/data/reference-originals/$(dirname "$path")"
+    mv "$home/$path" "$home/data/reference-originals/$path"
+    if [ -L "$w/main/$path" ]; then
+      ln -s "$(readlink "$w/main/$path")" "$home/$path"
+    else
+      ln -s "$w/main/$path" "$home/$path"
+    fi
+  done < <(git -C "$w/main" ls-tree -r -z --name-only HEAD)
+  printf 'private mixed extension\n' > "$home/.pi/extensions/private.ts"
+  printf '{"theme":"private"}\n' > "$home/.pi/settings.json"
+  printf 'private skill sibling\n' > "$home/.claude/mods/linked/private.txt"
+  printf 'retained project administration\n' > "$home/projects/store"
+  printf 'code_root=%s\ncode_head=%s\ncode_native_cwd=%s\n' \
+    "$w/main" "$(git -C "$w/main" rev-parse HEAD)" "$home" >> "$w/home/state/shared.meta"
+  printf -- '- shared - synthetic (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$w/main" "$home" > "$w/home/data/secondmates.md"
+  printf '%s\n' "$w"
+}
+
+test_prepared_reference_updates_keep_the_recognized_layout() {
+  local w old out rc kind private_before
+  w=$(new_reference_update_world reference-content)
+  old=$(git -C "$w/main" rev-parse HEAD)
+  private_before=$(git hash-object "$w/shared/.pi/settings.json" "$w/shared/.pi/extensions/private.ts" \
+    "$w/shared/.claude/mods/linked/private.txt" "$w/shared/projects/store")
+  bump_origin "$w" instr
+  git -C "$w/seed" update-index --chmod=+x bin/tool.sh
+  git -C "$w/seed" commit -qm 'synthetic regular-file executable-mode change'
+  git -C "$w/seed" push -q origin main
+  out=$(run_update "$w")
+  assert_contains "$out" 'firstmate: updated ' 'content-only advancement remains supported'
+  assert_contains "$(git -C "$w/main" ls-tree HEAD bin/tool.sh)" '100755 blob ' 'regular-file executable mode is not a reference-layout change'
+  assert_contains "$out" 'restart-secondmates: fm-shared' 'content-only change uses the existing replacement owner'
+  assert_equals "$(git -C "$w/main" rev-parse HEAD)" "$(git -C "$w/seed" rev-parse HEAD)" 'maintained source advanced'
+  assert_equals "$(cat "$w/main/AGENTS.md")" "$(cat "$w/shared/AGENTS.md")" 'existing reference exposes new content'
+  assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" 'retained Git history never advances'
+  assert_grep "code_head=$old" "$w/home/state/shared.meta" 'planning cannot fabricate a new native launch'
+  assert_equals "$private_before" "$(git hash-object "$w/shared/.pi/settings.json" "$w/shared/.pi/extensions/private.ts" \
+    "$w/shared/.claude/mods/linked/private.txt" "$w/shared/projects/store")" 'private fixture content stays unchanged'
+
+  for kind in added removed type alias; do
+    w=$(new_reference_update_world "reference-$kind")
+    old=$(git -C "$w/main" rev-parse HEAD)
+    case "$kind" in
+      added)
+        printf 'new managed extension\n' > "$w/seed/.pi/extensions/new.ts"
+        mkdir -p "$w/home/config"
+        printf 'origin main\n' > "$w/home/config/self-update-source"
+        ;;
+      removed) rm "$w/seed/bin/tool.sh" ;;
+      type)
+        rm "$w/seed/bin/tool.sh"
+        ln -s fm-session-start.sh "$w/seed/bin/tool.sh"
+        ;;
+      alias)
+        rm "$w/seed/.agents/skills/linked"
+        ln -s ../../.claude/mods/other "$w/seed/.agents/skills/linked"
+        ;;
+    esac
+    git -C "$w/seed" add -A
+    git -C "$w/seed" commit -qm "synthetic $kind layout change"
+    git -C "$w/seed" push -q origin main
+    rc=0
+    out=$(run_update "$w") || rc=$?
+    assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" "$kind layout must refuse BEFORE maintained bytes move"
+    assert_contains "$out" 'managed reference layout would change' "$kind refusal names the missing transition"
+    assert_contains "$out" 'restart-secondmates: none' "$kind refusal must not settle the old head as the requested update"
+    assert_contains "$out" 'nudge-secondmates: none' "$kind refusal must not substitute a nudge"
+    expect_code 1 "$rc" "$kind source-update refusal is explicit"
+    assert_equals "$old" "$(git -C "$w/shared" rev-parse HEAD)" "$kind refusal preserves retained history"
+    assert_grep "code_head=$old" "$w/home/state/shared.meta" "$kind refusal leaves launch metadata unchanged"
+    assert_equals "$w/main/AGENTS.md" "$(readlink "$w/shared/AGENTS.md")" "$kind refusal never prepares replacement references"
+    [ ! -e "$w/home/state/.control-shared.lock" ] && [ ! -L "$w/home/state/.control-shared.lock" ] \
+      || fail "$kind refusal leaked a lifecycle lock"
+  done
+  pass 'prepared references allow content-only advancement but refuse additions, removals, type and relative-alias changes before source moves'
+}
+
+test_shared_update_uses_lifecycle_locks_and_pins_its_target() {
+  local w old target future out rc real_git lock
+  w=$(new_reference_update_world reference-coordination)
+  old=$(git -C "$w/main" rev-parse HEAD)
+  bump_origin "$w" instr
+  target=$(git -C "$w/seed" rev-parse HEAD)
+  lock="$w/home/state/.control-shared.lock"
+  # A live fixture-owned legacy lock is also a supported lock input. This is
+  # this test shell, not a real worker or an unrelated process observation.
+  mkdir "$lock"
+  printf '%s\n' "$$" > "$lock/pid"
+  rc=0
+  out=$(run_update "$w") || rc=$?
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'a lifecycle owner prevents source advancement'
+  assert_contains "$out" 'shared-code lifecycle action is in progress for shared' 'busy lifecycle owner is reported'
+  assert_contains "$out" 'restart-secondmates: none' 'busy refusal does not announce a replacement'
+  expect_code 1 "$rc" 'source publication refuses while lifecycle is owned'
+  assert_equals "$$" "$(cat "$lock/pid")" 'another owner is never released by refusal cleanup'
+  rm "$lock/pid"
+  rmdir "$lock"
+
+  # A second, unselected commit exists only in the fresh fixture object store.
+  # The Git double moves the remote ref at publication time, after preflight.
+  printf 'unselected new extension\n' > "$w/seed/.pi/extensions/unselected.ts"
+  git -C "$w/seed" add -A
+  git -C "$w/seed" commit -qm 'synthetic later source shape'
+  future=$(git -C "$w/seed" rev-parse HEAD)
+  git -C "$w/main" fetch -q "$w/seed" "$future"
+  real_git=$(type -P git)
+  cat > "$w/fakebin/git" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_REFERENCE_MAIN" ] && [ "${3:-}" = merge ]; then
+  rc=0
+  result=$(/bin/bash -c '
+    . "$1/bin/fm-wake-lib.sh" || exit 2
+    if fm_lock_try_acquire "$2"; then
+      fm_lock_release "$2" || exit 2
+      printf "acquired\n"
+      exit 0
+    fi
+    [ -n "${FM_LOCK_HELD_PID:-}" ] || exit 2
+    printf "held:%s\n" "$FM_LOCK_HELD_PID"
+    exit 1
+  ' _ "$FM_REFERENCE_TEST_ROOT" "$FM_REFERENCE_LOCK") || rc=$?
+  if [ "$rc" != 1 ] || [ "$result" != "held:$(cat "$FM_REFERENCE_LOCK/pid")" ]; then
+    echo 'fixture: publication was not protected by the existing lifecycle lock' >&2
+    exit 1
+  fi
+  printf '%s\n' "$result" > "$FM_REFERENCE_LOCK_PROOF"
+  "$FM_REFERENCE_REAL_GIT" -C "$FM_REFERENCE_MAIN" update-ref refs/remotes/origin/main "$FM_REFERENCE_FUTURE"
+fi
+exec "$FM_REFERENCE_REAL_GIT" "$@"
+SH
+  chmod +x "$w/fakebin/git"
+  out=$(FM_REFERENCE_MAIN="$w/main" FM_REFERENCE_TEST_ROOT="$ROOT" FM_REFERENCE_LOCK="$lock" \
+    FM_REFERENCE_LOCK_PROOF="$w/lock-proof" FM_REFERENCE_REAL_GIT="$real_git" \
+    FM_REFERENCE_FUTURE="$future" run_update "$w")
+  grep -Eq '^held:[0-9]+$' "$w/lock-proof" \
+    || fail "public lock API did not prove exclusion during source publication: $out"
+  assert_equals "$target" "$(git -C "$w/main" rev-parse HEAD)" 'publication uses the inspected immutable target'
+  assert_equals "$future" "$(git -C "$w/main" rev-parse origin/main)" 'the fixture really moved the remote ref'
+  assert_contains "$out" 'restart-secondmates: fm-shared' 'shared settlement follows the selected commit, not a later remote ref'
+  [ ! -e "$w/main/.pi/extensions/unselected.ts" ] || fail 'uninspected layout was published'
+  [ ! -e "$lock" ] && [ ! -L "$lock" ] || fail 'successful update leaked its lifecycle lock'
+  assert_grep "code_head=$old" "$w/home/state/shared.meta" 'settlement never fabricates native source acceptance'
+  pass 'shared source advancement excludes lifecycle owners, holds their existing locks through publication, and pins its inspected commit'
+}
+
+test_reference_update_respects_route_and_view_ownership() {
+  local w old out rc
+  w=$(new_reference_update_world reference-source-owner)
+  old=$(git -C "$w/main" rev-parse HEAD)
+  bump_origin "$w" instr
+  rc=0
+  out=$(PATH="$w/fakebin:$PATH" FM_FAKE_DIR="$w/fake" FM_HOME="$w/shared" \
+    FM_ROOT_OVERRIDE="$w/main" "$UPDATE" 2>/dev/null) || rc=$?
+  expect_code 1 "$rc" 'a retained shared-code home cannot update its owning primary source'
+  assert_contains "$out" 'shared source update belongs to the owning primary' 'source owner is explicit'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'no update through a partial child inventory'
+
+  w=$(new_reference_update_world reference-registry-only)
+  old=$(git -C "$w/main" rev-parse HEAD)
+  mv "$w/home/state/shared.meta" "$w/saved-launch.meta"
+  printf 'new managed path\n' > "$w/seed/bin/new.sh"
+  git -C "$w/seed" add -A
+  git -C "$w/seed" commit -qm 'synthetic registry-only shape change'
+  git -C "$w/seed" push -q origin main
+  rc=0
+  out=$(run_update "$w") || rc=$?
+  expect_code 1 "$rc" 'a prepared registered view is protected even without a current launch record'
+  assert_contains "$out" 'managed reference layout would change' 'registry backstop participates before advancement'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'a missing launch record does not permit an inconsistent view'
+  [ ! -e "$w/home/state/shared.meta" ] || fail 'update activated an unlaunched route'
+  # An ambiguous id must not make the root field look absent and hide this
+  # prepared consumer from the preflight's registry backstop.
+  printf -- '- shared - duplicate (root: %s; home: %s; scope: test; projects: none; added 2026-01-01)\n' \
+    "$w/main" "$w/shared" >> "$w/home/data/secondmates.md"
+  rc=0
+  out=$(run_update "$w") || rc=$?
+  expect_code 1 "$rc" 'duplicate declared bindings cannot disappear from update preflight'
+  assert_contains "$out" 'shared-code binding cannot be verified' 'ambiguous registry is actionable'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'ambiguous registry does not publish the incompatible source'
+
+  w=$(new_reference_update_world reference-view-conflict)
+  old=$(git -C "$w/main" rev-parse HEAD)
+  rm "$w/shared/bin/tool.sh"
+  printf 'retained conflicting original\n' > "$w/shared/bin/tool.sh"
+  bump_origin "$w" instr
+  rc=0
+  out=$(run_update "$w") || rc=$?
+  expect_code 1 "$rc" 'an invalid current view refuses before source advancement'
+  assert_contains "$out" 'shared-code native view cannot be verified' 'view conflict is not treated as upkeep authority'
+  assert_equals "$old" "$(git -C "$w/main" rev-parse HEAD)" 'content advance does not precede view validation'
+  assert_equals "$(printf 'retained conflicting original\n' | git hash-object --stdin)" \
+    "$(git hash-object "$w/shared/bin/tool.sh")" 'conflicting bytes stay untouched'
+  pass 'shared source updates respect primary ownership, registered prepared views and conflicting originals'
+}
+
+test_prepared_reference_updates_keep_the_recognized_layout
+test_shared_update_uses_lifecycle_locks_and_pins_its_target
+test_reference_update_respects_route_and_view_ownership
 test_shared_code_update_rebinds_from_code_not_retained_home
 test_updates_main_and_secondmate
 test_reread_gate_is_instruction_only

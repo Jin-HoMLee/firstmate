@@ -549,6 +549,42 @@ secondmate_shared_code_reference_paths() {  # <source-checkout>; diagnostic/fixt
     ls-tree -r --name-only HEAD -- "${SECONDMATE_REFERENCE_SURFACES[@]}"
 }
 
+# Compare immutable Git layouts before advancing a source that prepared homes
+# already reference. Regular-file content/mode changes flow through those
+# references; additions, removals, type changes and changed relative aliases
+# need separately authorized view upkeep. Never prepare references here.
+secondmate_shared_code_same_reference_shape() {  # <code-root> <old-commit> <target-commit>
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1" "$2" "$3" "${SECONDMATE_REFERENCE_SURFACES[@]}" <<'PY_REFERENCE_SHAPE'
+import os
+import subprocess
+import sys
+
+root, before, after, *surfaces = sys.argv[1:]
+env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1")
+
+def shape(commit):
+    rows = subprocess.run(["git", "-C", root, "ls-tree", "-r", "-z", commit, "--", *surfaces],
+                          env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
+    result = {}
+    for row in rows.split(b"\0"):
+        if not row:
+            continue
+        header, path = row.split(b"\t", 1)
+        mode, kind, oid = header.split()
+        if kind != b"blob" or mode not in (b"100644", b"100755", b"120000"):
+            raise ValueError("unsupported managed type")
+        result[path] = (b"alias", oid) if mode == b"120000" else (b"file",)
+    return result
+
+try:
+    identical = shape(before) == shape(after)
+except (OSError, ValueError, subprocess.SubprocessError):
+    raise SystemExit(1)
+raise SystemExit(0 if identical else 1)
+PY_REFERENCE_SHAPE
+}
+
 secondmate_shared_code_references_valid() {  # <code-root> <retained-home>
   command -v python3 >/dev/null 2>&1 || {
     printf 'error: python3 is required to verify prepared managed references\n' >&2; return 1;
