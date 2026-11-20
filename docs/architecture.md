@@ -382,7 +382,7 @@ Polytoken composes a concrete model and supported reasoning level through its [a
 ## Optional secondmates
 
 `data/secondmates.md` records persistent secondmates with natural-language scopes, project clone lists, and home paths.
-A local route points directly at its home, while a remote route adds an SSH alias and remote Firstmate code root so the entire home and all of its child work stay on that host.
+The [routing owner](../.agents/skills/secondmate-provisioning/SKILL.md#routing-table) distinguishes legacy local, explicit [local shared-code](configuration.md#local-shared-code-binding), and whole-home remote placement.
 [Remote second-mate placement](remote-secondmates.md#launch-or-recover) leaves the remote home's worker backend selection independent, and every non-doctor primary-to-remote `fm-on` command runs through the remote account's Firstmate-owned job worker rather than its SSH process or a Herdr pane.
 [`remote-secondmates.md`](remote-secondmates.md) owns current setup, supplied-origin provisioning, transport, relay, failure, and retirement behavior.
 `fm-home-seed.sh` provisions a local isolated home, clones the listed PR-based projects into it, initializes newly cloned `no-mistakes` projects, copies the charter to `data/charter.md`, and `fm-spawn.sh --secondmate` launches it through the same session-provider and status-file path as any direct report.
@@ -403,10 +403,9 @@ After seeding a secondmate, `fm-backlog-handoff.sh` validates the fleet-specific
 The [`fm-backlog-handoff.sh`](../bin/fm-backlog-handoff.sh) header owns route-specific wake outcomes, remote outbox release after receipt, and stable wake-correlation retry behavior.
 `tests/fm-backlog-handoff.test.sh` and `tests/fm-remote-backlog-handoff.test.sh` pin the local and remote delivery boundaries.
 An unreachable remote host is unknown rather than dead, preserves its route and durable work, and is never failed over or relaunched locally.
-Idle secondmate endpoints are healthy; teardown is explicit and refuses while the secondmate home has in-flight work unless the captain has approved discard with `--force`.
+Idle secondmate endpoints are healthy; the [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md#retirement-and-teardown) owns retirement and its binding-specific limits.
 
-Secondmate homes converge conservatively to the primary's version and declared inherited local material at launch and during locked session start.
-The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md) owns the full guarded sync, propagation, nudge, and mid-session local-material push contract.
+The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md#charter-and-seed) owns guarded source convergence, propagation, nudge, and mid-session local-material push.
 
 Secondmate agents can run on a different verified harness than crewmates.
 [`configuration.md`](configuration.md#choose-the-secondmate-harness) owns secondmate runtime pinning, per-mate overrides, precedence, compatibility, and malformed-file refusal.
@@ -550,13 +549,8 @@ The refresh also prunes local branches whose remote is gone and that no worktree
 
 ## Self-updates stay safe
 
-`/updatefirstmate` fast-forwards the running firstmate repo and registered secondmate homes from `origin`, or from the one branch an optional [`config/self-update-source`](configuration.md#self-update-source-configself-update-source) names, without touching project clones.
-It restarts every live second mate whose home the pass left on the target commit through a persist-gated replacement, including a home that needed no advance, because a restart is also the only thing that re-resolves launch-time harness wiring; the re-read nudge is retained only as the fallback for live agents whose runtime cannot prove a restart.
-For a remote route, the configured code root updates from its own origin on that host before the persistent home fast-forwards to the code-root commit.
-The primary update is fast-forward only, while a clean secondmate divergence may reconcile with `reset --keep` only when a three-way temporary-index proof shows its complete local tree result is already present at the target, including after a squash merge.
-Dirty, uniquely diverged, offline, and off-default targets are reported and left untouched, and genuine secondmate divergence remains visible through a durable reconciliation record until a later successful convergence clears it.
-Local homes share the guarded fast-forward helper, while remote updates delegate the same safety decision to the configured host through the generic transport.
-The procedure and outcome vocabulary are owned by the [`/updatefirstmate` skill](../.agents/skills/updatefirstmate/SKILL.md); the relevant script headers own the mechanics.
+The [`/updatefirstmate` skill](../.agents/skills/updatefirstmate/SKILL.md) owns the guarded fleet-update procedure, persistence/restart requirements, and outcome vocabulary.
+[`fm-ff-lib.sh`](../bin/fm-ff-lib.sh) owns source convergence; [`fm-update.sh`](../bin/fm-update.sh) owns publication coordination and consumer refresh for [local shared-code bindings](configuration.md#local-shared-code-binding).
 
 ## Restart-proof
 

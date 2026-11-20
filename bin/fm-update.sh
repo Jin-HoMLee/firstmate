@@ -387,12 +387,10 @@ claim_settled_secondmate() {  # <id>
 # bin/fm-ff-lib.sh calls this for each local home it left AT the base with a live
 # endpoint - status "updated" or "current" alike. A skipped home never gets here.
 fm_ff_after_secondmate_settled() {  # <id> <home> <window> <status> <instr>
-  # Same bin/-changed-out-from-under-a-watch problem as the primary home
-  # above, for a local secondmate's own worktree; "current" means bin/ did
-  # not move there this pass, so there is nothing to rebind. Run the
-  # binding's code copy of the script, with the target home explicit. Legacy
-  # routes use their own source; shared-code routes use the validated root,
-  # never a leaked outer override or the retained old source.
+  # "current" on a shared binding describes the selected source, not an
+  # unchanged retained checkout or refreshed native wiring. Consumers must
+  # use the binding's code root and target home, never the retained old source
+  # or the updating parent's private selectors.
   local rebind_root=${SECONDMATE_LOCAL_CODE_ROOT:-$2} rebind_needed=0 launch_head
   local -a home_env
   home_env=("FM_HOME=$2" "FM_ROOT_OVERRIDE=$rebind_root")

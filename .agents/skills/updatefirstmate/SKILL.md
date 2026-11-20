@@ -14,7 +14,8 @@ Self-update firstmate in place.
 Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (`AGENTS.md`, `bin/`, `.agents/skills/`, and public `skills/`) reaches `main` and then sits there until each running firstmate pulls it.
 Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is installer-facing and is not loaded by firstmate.
 This skill performs that pull for the running main firstmate and every secondmate, without disturbing any in-flight work.
-Updating is consumption, not publication: it only pulls from upstream, so every home runs it regardless of role, and the firstmate-repository publication boundary (`firstmate-self-repo`) never applies to it.
+Updating is consumption, not publication: it only pulls from upstream, so the firstmate-repository publication boundary (`firstmate-self-repo`) never applies to it.
+The [local shared-code contract](../../../docs/configuration.md#local-shared-code-binding) determines which home owns that source update.
 
 Pulling the files is only half of it.
 A running agent holds `AGENTS.md` and every skill it has already loaded frozen from the moment it launched, and no verified harness offers a reload, so new bytes on disk change nothing for it until it starts a fresh conversation.
@@ -28,7 +29,8 @@ The only live mates that do not restart are the ones whose home the update pass 
 **One-time rollout note:** the update that carries this change is still executed by the previous release, which restarts only the mates whose `AGENTS.md` or `.agents/skills/` moved on that pass. After it completes, run `bin/fm-secondmate-restart.sh <fm-id>...` once with every live second mate ID, not only the ones that release named; later updates follow the normal flow below.
 
 The source is `origin` unless this home has `config/self-update-source`, which names one remote branch for the primary to follow instead, with local secondmates following the primary's resulting commit; [`docs/configuration.md`](../../../docs/configuration.md#self-update-source-configself-update-source) owns that contract, including its remote-secondmate limit.
-The primary update is fast-forward only, while each secondmate uses the same guarded convergence path plus one narrow recovery for squash-merged local history.
+The primary update is fast-forward only, while legacy secondmate sources use the same guarded convergence path plus one narrow recovery for squash-merged local history.
+Explicit local shared-code routes instead follow their [configuration contract](../../../docs/configuration.md#local-shared-code-binding); do not treat the retained home's source as an update target.
 For a remote route, it updates the configured Firstmate code root on that host from its own origin, then guardedly fast-forwards the persistent home to that code-root commit.
 It never forces, never creates a merge commit, and never stashes.
 A clean secondmate divergence advances with `reset --keep` only when a three-way tree proof shows its complete local result is already present at the target, which recognizes squash-merged contributions without discarding unique content.
@@ -42,15 +44,15 @@ This touches only the firstmate repo and its own worktrees, never anything under
    ```sh
    bin/fm-update.sh
    ```
-   It fast-forwards this firstmate repo's default branch from origin, or from the configured self-update source, then updates every registered local or remote secondmate home through its placement-specific guarded path.
+   It fast-forwards this firstmate repo's default branch from origin, or from the configured self-update source, then processes registered secondmates through their source-binding and placement-specific guarded paths.
    When a source is configured it prints a `self-update source:` line first, and an unusable config file stops the whole update before anything moves; report that file to the captain rather than editing or removing it.
-   It prints one status line per target (`updated <old>..<new>` / `reconciled redundant divergence <old>..<new>` / `already current` / `skipped: <reason>`), followed by three action lines that tell you exactly what to do next:
+   It reports each target's source outcome, followed by three action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
    - `restart-secondmates: fm-<id>...|none`
    - `nudge-secondmates: fm-<id>...|none`
 
    The two second-mate sets are disjoint and the script owns the split; do not re-derive it.
-   `restart-secondmates:` carries every live mate the pass left on the latest commit, whether it advanced or was already there.
+   `restart-secondmates:` carries every live mate whose source binding and required consumer refresh the pass accepted at the selected commit, whether it advanced or was already there.
    A mate reaches neither set only because its home was skipped, because it has no live endpoint recorded here, or because its endpoint was positively classified as dead or missing.
    A skipped genuine divergence still requires attention through its durable reconciliation record; the other two cases need no update action from you.
 
@@ -85,7 +87,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    FM_HOME=<this-firstmate-home> bin/fm-send.sh <id> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
    ```
    These are the mates that are on the latest bytes but could not be restarted provably, so the steer is the most this pass can honestly do for them.
-   It is a gentle steer, not an interruption: the mate already got a safe tracked-files fast-forward, and the steer never forces, tears down, or discards its work.
+   It is a gentle steer, not an interruption: the updater accepted the mate's source at the selected commit, and the steer never forces, tears down, or discards its work.
    Never describe one of these as reloaded; its agent is still running the wiring it launched with.
 
 5. **Report to the captain in plain outcomes, in one line where you can.**
@@ -103,7 +105,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
 - **Only the firstmate repo and its worktrees** are touched, never `projects/`.
   It is the same sanctioned self-write as the fleet sync.
 - **Nothing with work in it is disrupted.**
-  A local or remote second mate gets a tracked-files fast-forward only when its own checkout is safe to advance, and a mate whose home was skipped is not restarted either.
+  A legacy local or remote second mate gets a tracked-files fast-forward only when its own checkout is safe to advance, and a mate whose binding was skipped is not restarted either.
   A restart replaces that mate's agent in the same home and endpoint after its open work is written down; it is never a teardown and never forced.
   Its crewmates keep running in their own endpoints, and every durable record - backlog, held captain calls, unread status, unhandled instructions - is re-presented to the replacement at startup.
   A restart refused before it is attempted leaves that mate on the re-read path; once a relaunch is attempted, any failed or ambiguous result is reported as unknown rather than attributed to either incarnation.

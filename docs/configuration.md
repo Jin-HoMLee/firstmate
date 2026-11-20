@@ -1347,7 +1347,8 @@ It holds one line, `<remote> <branch>`, for example `fork carry`, naming a remot
 When the file is absent, `/updatefirstmate` fast-forwards from `origin` exactly as before.
 
 When it is present, [`bin/fm-update.sh`](../bin/fm-update.sh) fetches only that branch and fast-forwards the primary to it under the same guards as the origin path: a dirty, off-default, or diverged primary is skipped and left untouched, so the named branch must only ever move forward.
-Local secondmate homes then advance to the primary's resulting default-branch commit, the same commit the startup secondmate sync follows, and a standalone-clone home that lacks that commit imports it from the primary first.
+Legacy local secondmate homes then advance to the primary's resulting default-branch commit, the same commit the startup secondmate sync follows, and a standalone-clone home that lacks that commit imports it from the primary first.
+Explicit local bindings follow the [shared-code contract](#local-shared-code-binding) instead.
 A remote secondmate's host runs its own update against its own code root, so a remote home follows the named branch only when that code root has the same file; otherwise it keeps following its own origin.
 Worker spawns, review diffs, the cleanup landed-work test, lint, and default-branch detection keep using `origin`, so work started in this home still branches from, and is judged against, upstream.
 An unreadable or malformed file, an unknown remote, or an invalid branch name stops the whole update before anything moves and names the file; it never falls back to `origin`.
@@ -1367,7 +1368,8 @@ There is no automatic conversion, source adoption, home replacement, new launche
 The root must resolve to the invoking primary's code root, not a task copy or secondmate home, and must be separate from the operational home.
 Ordinary local routes without `root:` retain their existing behavior; remote `host:` routes are unchanged.
 
-The bounded implementation accepts **Pi and pi-signed on tmux**. It also accepts their **Herdr same-home resume contract only for a verified, already-prepared individual-reference view** described below.
+The bounded implementation accepts **Pi and pi-signed on tmux**.
+It also accepts their **Herdr same-home resume contract only for a verified, already-prepared individual-reference view** described below.
 Herdr remains unsupported for the shared-cwd shape: its [agent session identity requirement](herdr-backend.md#agent-status-authority-and-relaunch) is not a cross-root resume capability.
 It never changes a configured runtime to get around a refusal.
 Primary-session handoff and replacement of retained safeguards are not supplied by this setting.
@@ -1384,7 +1386,7 @@ Startup/update never fast-forwards, resets, fetches into, or runs maintenance ho
 A declared but unlaunched binding is skipped, not activated by a sweep.
 After a shared source change, startup reports the need for the existing update/restart owner instead of pretending that an AGENTS-only reread refreshed native wiring.
 The update owner refreshes action bindings from the shared code with each target's own `FM_HOME`, and the normal correlated persistence/restart contract remains required before replacement.
-An existing contribution check is refreshed through `fm-contributions.sh arm --refresh-existing` and the authenticated registration owner even when no contribution rows remain or the source HEAD is already current.
+An existing contribution check is refreshed through its [producer and authenticated registration owner](../bin/fm-contributions.sh) even when no contribution rows remain or the source HEAD is already current; that script's header owns the refresh flags.
 That source-only refresh preserves its serialized private data/config selectors and numeric polling/reply policy; it does not inherit the updating parent's private selectors or settings.
 Untrusted checks, unknown custom bodies, or mismatched home/state/source bindings remain unchanged and keep that target out of the update's restart set; no arbitrary check is automatically re-trusted.
 Shared-code home retirement is unsupported and refused, including forced descendant cleanup; retain the homes, private project Git administration, external-copy dependencies and unresolved custody records in place.
@@ -1397,8 +1399,13 @@ In particular, a skill-directory alias still reaches the home's mixed target dir
 The selected committed source surface must be unchanged, and retired tracked managed originals cannot remain active; conflicts, missing/new required references, or a changed recorded cwd refuse rather than mutate files or fall back to another context.
 Private, configured and ancestor resources are not disabled, rewritten or assumed absent.
 
-This view keeps native cwd, native project settings/system prompts, account selection, and the existing native session namespace at the home. It adds neither `--session-dir` nor `--approve`.
-Herdr replacement requires its existing path-backed Pi session registration before stopping the agent. The registered owned, plain session file's first record must be a session header identifying the retained home; only that header candidate is inspected, without traversing or emitting conversation entries. ID-only references, foreign cwd or unreadable/malformed headers refuse without guessing an account/store or rewriting a session. The existing replacement transaction checkpoints that session reference; spawn checks again and refuses even a different same-home reference after the checkpoint. It renders the verified reference with ordinary `--session` and refuses a fresh-session fallback.
+This view keeps native cwd, native project settings/system prompts, account selection, and the existing native session namespace at the home.
+It adds neither `--session-dir` nor `--approve`.
+Herdr replacement requires its existing path-backed Pi session registration before stopping the agent.
+The registered owned, plain session file's first record must be a session header identifying the retained home; only that header candidate is inspected, without traversing or emitting conversation entries.
+ID-only references, foreign cwd or unreadable/malformed headers refuse without guessing an account/store or rewriting a session.
+The existing replacement transaction checkpoints that session reference; spawn checks again and refuses even a different same-home reference after the checkpoint.
+It renders the verified reference with ordinary `--session` and refuses a fresh-session fallback.
 The source-relative module origin can remain the home path under Pi's loader; canonical primary extension arguments and `FM_ROOT_OVERRIDE` still identify maintained code, and the covered relative imports/scripts use the prepared references.
 No reference provisioning, original-file relocation/archive, trust change, configuration merge, history rewrite or live adoption is performed by these checks or launch commands.
 Before preparing a real view, the existing preservation/adoption owner must establish the exact managed-path dispositions, mixed/private and modified-file custody, original bytes outside active discovery, safeguards, source-update coordination and non-overwriting rollback; Git-tracked status alone is not that authority.
@@ -1408,6 +1415,7 @@ This path does not implement a layout-changing transition; preparing extra refer
 The update uses the inspected commit rather than a moving remote ref, and holds its local shared consumers' existing lifecycle locks through publication and consumer refresh; first shared activation and controlled replacement honor those same locks.
 The script header owns that direct-report/declared-route scope, and a retained shared-code secondmate cannot update the primary source through its own partial registry.
 An explicit project refresh of the primary source also refuses when local shared bindings are recorded or requested; use `fm-update.sh` rather than bypassing its coordination through `fm-fleet-sync.sh`.
+Both source-publication boundaries validate the selected secondmate registry and refuse malformed entry rows rather than treating them as absent consumers; ordinary non-entry prose remains acceptable.
 These are source-side checks, not all-home transition acceptance: actual native ownership, private custody, arriving-work handoff and non-overwriting rollback remain independent requirements, and an unregistered or nested consumer must not be assumed covered by another home's direct-report checks.
 The locks serialize publication with launch/replacement, not every command an already-running agent may execute; multi-file Git advancement is not an atomic native transition.
 Existing native precedence and resource exclusions remain in force; this preflight is not proof that every managed resource actually loaded or that a private selector still names a supported entrypoint.
@@ -1600,8 +1608,7 @@ Kimi continues to use the captain's normal Kimi home, including the existing con
 The Kimi installer requires an existing regular non-symlink `~/.kimi-code/config.toml`, `python3` with `tomllib`, and `jq`; it validates but never serializes the captain's TOML and refuses before writing when the config is missing, malformed, or surprising or when either tool requirement is unavailable.
 
 Its `remove` action excises only the marker-delimited Firstmate region and removes Firstmate's hook files.
-For Pi and pi-signed secondmate launches, `fm-spawn.sh` starts the selected executable with `-e` pointed at the secondmate home's own tracked `.pi/extensions/fm-primary-pi-watch.ts` and `.pi/extensions/fm-primary-turnend-guard.ts`, both already present from the secondmate home's git worktree, plus the parent home's `state/<id>.pi-ext.ts` busy extension.
-Pi-family secondmates can start unattended in Firstmate-seeded homes without accepting project trust manually; [`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns the capability requirement, session-only approval scope, and older-version fallback, with [regression evidence](verification/runtime-backends.md#pi-seeded-secondmate-project-trust).
+For Pi and pi-signed secondmate launches, [`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns primary-extension source selection and project-trust approval, subject to the [local shared-code limits](#local-shared-code-binding); [seeded-home trust verification](verification/runtime-backends.md#pi-seeded-secondmate-project-trust) covers the legacy launch shape.
 
 For omp secondmate launches, `fm-spawn.sh` names only the parent home's `state/<id>.omp-ext.ts` busy extension with `-e`: omp auto-discovers the home's tracked `.omp/extensions/` with no trust gate, and naming a discovered file with `-e` as well loads it twice; every omp launch also carries the tracked `.omp/fm-worker-overlay.yml` posture overlay through `--config`, which [`fm-spawn.sh --help`](../bin/fm-spawn.sh) owns.
 

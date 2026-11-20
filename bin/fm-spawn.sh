@@ -271,7 +271,8 @@
 #   also adds --approve when that help advertises it, so the first unattended
 #   launch does not stall on Pi's "Trust project folder?" dialog for that home
 #   path; --approve is session-scoped to the launch cwd and does not rewrite the
-#   operator's trust.json. Ordinary Pi worker launches never receive --approve.
+#   operator's trust.json. The retained-home reference view described below
+#   omits this approval. Ordinary Pi worker launches never receive --approve.
 #   A missing selected executable refuses before endpoint creation, and pi-signed
 #   never falls back to pi.
 #   Devin is worker-only: --permission-mode dangerous and
@@ -553,11 +554,12 @@
 #     __CLAUDESETTINGS__ the single claude --settings value: a quoted inline
 #                  JSON object for a crewmate or scout, or a quoted path to
 #                  state/<task-id>.claude-settings.json for a secondmate
-#     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
+#     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH,
+#                  plus the private --session-dir argument for shared-cwd launches
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
 #     __PIAPPROVE__ optional --approve on a seeded Pi/pi-signed secondmate when
-#                  that executable advertises the flag (empty otherwise; session
-#                  trust for the launch cwd only, never a trust.json rewrite)
+#                  that executable advertises the flag, except for the retained-home
+#                  reference view above (session trust only, never a trust.json rewrite)
 #     __PIEXCLUDE__ optional ` --exclude-tools '<comma-joined names>'` from
 #                  config/crew-exclude-tools on Pi/pi-signed ship and scout
 #                  launches (supplies its own leading space, empty otherwise)
@@ -569,7 +571,7 @@
 #                  swallow the launch prompt.
 #     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
 #                  Pi replacement on the session the endpoint's runtime already
-#                  reports (relaunch_resume_args below owns it; it supplies its
+#                  reports (the relaunch rendering below owns it; it supplies its
 #                  own leading space, and is empty on every fresh spawn and for
 #                  every other harness)
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
@@ -577,8 +579,9 @@
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi busy-state extension,
 #                  written by this script; outside the worktree to avoid pi's trust gate;
 #                  a secondmate loads it beside its two primary extensions)
-#     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts in a pi secondmate home
-#     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts in a pi secondmate home
+#     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts
+#     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts
+#                  Both use the selected code root: shared root or legacy home.
 #     __OMPBIN__   quoted concrete omp executable path resolved from PATH
 #     __OMPPROFILE__ optional ` --profile '<name>'` from the per-secondmate omp
 #                  profile pin (supplies its own leading space, empty otherwise)
