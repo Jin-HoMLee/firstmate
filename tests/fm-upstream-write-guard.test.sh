@@ -147,6 +147,26 @@ for tool in gh gh-axi; do
 done
 pass "only owning query-field options establish payloads across separate and attached forms"
 
+for tool in gh gh-axi; do
+  for flag in --include --silent --paginate --slurp --verbose -i; do
+    expect_refused "$tool" api graphql "$flag" --template --help -f "$mutation"
+    expect_refused "$tool" api graphql "$flag" --template -h -f "$mutation"
+    expect_allowed "$tool" api graphql "$flag" --template --help -f "$query"
+    expect_allowed "$tool" api graphql "$flag" --help -f "$mutation"
+    expect_allowed "$tool" api graphql "$flag" -h -f "$mutation"
+  done
+  for option in --template -t --header -H --jq -q --cache --preview -p --hostname --repo -R; do
+    expect_refused "$tool" api graphql --include "$option" --help -f "$mutation"
+    expect_allowed "$tool" api graphql --include "$option" --help -f "$query"
+  done
+  expect_refused "$tool" api graphql --include --template=--help -f "$mutation"
+  expect_refused "$tool" api graphql --include -t--help -f "$mutation"
+  expect_allowed "$tool" api graphql --include --template --help -f "$mutation" --help
+  expect_allowed "$tool" api --help
+  expect_allowed "$tool" api /repos/kunchenguid/dotfiles/commits --include --template --help --method GET -f sha=main
+done
+pass "API help exemptions respect option ownership and non-consuming boolean flags"
+
 input_body="$TMP_ROOT/graphql-input.json"
 printf '%s\n' '{"query":"mutation { addComment(input:{subjectId:\"protected-PR-node-id\",body:\"text\"}) { clientMutationId } }"}' >"$input_body"
 for tool in gh gh-axi; do
@@ -168,6 +188,19 @@ for endpoint in graphql /graphql https://api.github.com/graphql; do
   esac
   policy_graphql_read=$(node "$POLICY" --root "$ROOT" --command "gh api $endpoint --raw-field='$query' --template '$mutation'")
   [ "$policy_graphql_read" = allow ] || fail "primary shell policy blocked an attached GraphQL read: $policy_graphql_read"
+  for tool in gh gh-axi; do
+    policy_graphql_write=$(node "$POLICY" --root "$ROOT" --command "$tool api $endpoint --include --template --help -f '$mutation'")
+    case "$policy_graphql_write" in
+      deny*) ;;
+      *) fail "primary shell policy treated a template value as help: $policy_graphql_write" ;;
+    esac
+    for command in \
+      "$tool api $endpoint --include --template --help -f '$query'" \
+      "$tool api $endpoint --include --help -f '$mutation'"; do
+      policy_graphql_read=$(node "$POLICY" --root "$ROOT" --command "$command")
+      [ "$policy_graphql_read" = allow ] || fail "primary shell policy blocked genuine API help or a read: $policy_graphql_read"
+    done
+  done
 done
 pass "primary shell policy shares endpoint and query-option classification"
 
@@ -411,6 +444,83 @@ status=0
 [ "$status" -eq 2 ] || fail "protected git push should be refused locally"
 [ ! -e "$remote/refs/heads/test" ] || fail "protected push unexpectedly changed the local bare remote"
 pass "git push destination classification blocks the protected remote without network access"
+
+push_home="$TMP_ROOT/push-policy-home"
+protected_clone="$push_home/projects/upstream"
+push_stubs="$TMP_ROOT/push-stubs"
+push_log="$TMP_ROOT/mock-push.log"
+real_git=$(command -v git)
+fm_git_init_commit "$push_home"
+fm_git_init_commit "$protected_clone"
+git -C "$push_home" remote add origin git@github.com:Jin-HoMLee/dotfiles.git
+git -C "$protected_clone" remote add origin git@github.com:kunchenguid/dotfiles.git
+mkdir -p "$push_stubs"
+: >"$push_log"
+cat >"$push_stubs/git" <<'SH'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [ "$arg" = push ]; then
+    printf 'mock push: %s\n' "$*" >>"$FM_TEST_PUSH_LOG"
+    exit 0
+  fi
+done
+exec "$FM_TEST_REAL_GIT" "$@"
+SH
+chmod +x "$push_stubs/git"
+
+expect_push_policy() {
+  local expected=$1 command=$2 verdict before
+  before=$(wc -l <"$push_log" | tr -d ' ')
+  verdict=$(
+    cd "$push_home" || exit 1
+    FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" PATH="$push_stubs:$PATH" \
+      node "$POLICY" --root "$ROOT" --command "$command"
+  ) || fail "primary push policy did not return a decision"
+  case "$expected/$verdict" in
+    deny/deny*) ;;
+    allow/allow)
+      (
+        cd "$push_home" || exit 1
+        FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" PATH="$push_stubs:$PATH" \
+          bash -c "$command"
+      ) >"$TMP_ROOT/mock-push.out" 2>"$TMP_ROOT/mock-push.err" || fail "allowed mock push did not execute: $command"
+      before=$((before + 1))
+      ;;
+    *) fail "primary push policy expected $expected for $command, got $verdict" ;;
+  esac
+  [ "$(wc -l <"$push_log" | tr -d ' ')" -eq "$before" ] || fail "unexpected mock push count for $command"
+}
+
+for command in \
+  '(cd projects/upstream && git -C . push origin HEAD)' \
+  '(cd projects/upstream && git -C. push origin HEAD)' \
+  '(cd projects/upstream && git push origin HEAD)' \
+  'env -C projects/upstream git push origin HEAD' \
+  'env -Cprojects/upstream git -C . push origin HEAD' \
+  'env --chdir projects/upstream git push origin HEAD' \
+  'env --chdir=projects/upstream git push origin HEAD' \
+  'env -iC projects/upstream git push origin HEAD' \
+  'if true; then env -C projects/upstream git -C . push origin HEAD; fi' \
+  "env -C '$protected_clone' sh -c 'git -C . push origin HEAD'" \
+  "git -C '$protected_clone' push origin HEAD"; do
+  expect_push_policy deny "$command"
+done
+for command in \
+  'git -C . push origin HEAD' \
+  'env FIXTURE=1 git -C . push origin HEAD' \
+  "(cd projects/upstream && git -C '$push_home' push origin HEAD)" \
+  "(cd projects/upstream && git -C'$push_home' push origin HEAD)"; do
+  expect_push_policy allow "$command"
+done
+for command in \
+  '(cd projects/upstream && git -C . status --short)' \
+  'env -C projects/upstream git status --short' \
+  "env -C projects/upstream git -C '$push_home' push origin HEAD" \
+  "env --chdir=projects/upstream git -C '$push_home' push origin HEAD"; do
+  verdict=$(cd "$push_home" && node "$POLICY" --root "$ROOT" --command "$command")
+  [ "$verdict" = allow ] || fail "primary policy blocked a read or an independently anchored fork push: $verdict"
+done
+pass "primary push policy refuses unresolved directory context while retaining reads and anchored fork pushes"
 
 status=0
 "$GUARD" check git -C "$repo" -c remote.pushDefault=git@github.com:kunchenguid/dotfiles.git push \
@@ -674,6 +784,9 @@ const runtimes = [
 for (const runtime of runtimes) {
   await assert.rejects(runtime.call("gh pr merge 48 --repo kunchenguid/dotfiles"), /protected-upstream-write/);
   await assert.rejects(runtime.call(`gh api --method POST graphql -f 'query=mutation { addComment(input:{subjectId:"protected-id",body:"text"}) { clientMutationId } }'`), /protected-upstream-write/);
+  await assert.rejects(runtime.call(`gh api graphql --include --template --help -f 'query=mutation { addComment(input:{subjectId:"protected-id",body:"text"}) { clientMutationId } }'`), /protected-upstream-write/);
+  await runtime.call("gh api graphql --include --help");
+  await runtime.call("gh api graphql --include --template --help --raw-field='query={viewer{login}}'");
   await runtime.call("gh pr view 48 --repo kunchenguid/dotfiles");
   await runtime.call(`gh api --method POST graphql -f 'query={ organization(login:"kunchenguid"){ id } }'`);
   await assert.rejects(runtime.call(`gh api --method POST https://api.github.com/graphql -f 'query=mutation { addComment(input:{subjectId:"protected-id",body:"text"}) { clientMutationId } }'`), /protected-upstream-write/);
@@ -720,7 +833,11 @@ for tool in gh gh-axi; do
       "$tool" api --method POST "$endpoint" -R kunchenguid/dotfiles -f "$mutation" \
       || fail "explicit GraphQL authorization should still execute and audit through $endpoint"
   done
-  [ "$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f | wc -l | tr -d ' ')" = 3 ] \
+  FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
+    "$tool" api graphql --include --template --help -R kunchenguid/dotfiles -f "$mutation" \
+    || fail "a help-like template must retain exact mutation authorization and auditing"
+  [ "$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f | wc -l | tr -d ' ')" = 4 ] \
     || fail "each equivalent GraphQL authorization should create its own audit record"
   record=$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
   [ -n "$record" ] || fail "GraphQL authorization did not create an audit record"

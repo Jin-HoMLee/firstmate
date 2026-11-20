@@ -265,30 +265,32 @@ classify_gh() {
   parse_top_sub_and_target "$tool" "$@"
   if [ -n "$API_METHOD" ]; then method=$API_METHOD; method_explicit=1; fi
 
-  for arg in "$@"; do
-    if [ "$expect_value" -eq 1 ]; then
-      expect_value=0
-      continue
-    fi
-    case "$arg" in
-      --help|--version) return 0 ;;
-      -h)
-        case "$TOP/$SUB" in
-          repo/create|repo/edit) expect_value=1 ;;
-          *) return 0 ;;
-        esac
-        ;;
-      --) break ;;
-      -*)
-        case "$arg" in
-          *=*) ;;
-          --*) expect_value=1 ;;
-          -?) expect_value=1 ;;
-          -??*) ;;
-        esac
-        ;;
-    esac
-  done
+  if [ "$TOP" != api ]; then
+    for arg in "$@"; do
+      if [ "$expect_value" -eq 1 ]; then
+        expect_value=0
+        continue
+      fi
+      case "$arg" in
+        --help|--version) return 0 ;;
+        -h)
+          case "$TOP/$SUB" in
+            repo/create|repo/edit) expect_value=1 ;;
+            *) return 0 ;;
+          esac
+          ;;
+        --) break ;;
+        -*)
+          case "$arg" in
+            *=*) ;;
+            --*) expect_value=1 ;;
+            -?) expect_value=1 ;;
+            -??*) ;;
+          esac
+          ;;
+      esac
+    done
+  fi
   [ -n "$TOP" ] || return 0
 
   case "$TOP" in
@@ -365,6 +367,7 @@ classify_gh() {
             orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
           esac
           case "$arg" in
+            --help|--version|-h) return 0 ;;
             --) break ;;
             -X|--method) expect_api_value=method; method_explicit=1 ;;
             -X=*|--method=*) method=${arg#*=}; method_explicit=1 ;;
@@ -374,7 +377,7 @@ classify_gh() {
             -f?*|-F?*) has_fields=1; field=${arg#??} ;;
             --input) has_fields=1; has_input=1; expect_api_value=other ;;
             --input=*) has_fields=1; has_input=1 ;;
-            -H|--header|-q|--jq|-t|--template|--hostname|--cache|-p|--preview) expect_api_value=other ;;
+            -H|--header|-q|--jq|-t|--template|--hostname|--cache|-p|--preview|-R|--repo) expect_api_value=other ;;
           esac
         fi
         case "$field" in

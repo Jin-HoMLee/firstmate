@@ -6,7 +6,7 @@
 // and git command positions and asks that owner for a local-only verdict.
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeProgram, Lexer } from "./fm-arm-command-policy.mjs";
 
@@ -70,21 +70,22 @@ function rawLexErrorMention(command, root) {
 
 function gitPushInfo(position) {
   if (!position.command || base(position.command.value) !== "git") return null;
-  const args = position.words.slice(position.index + 1).map((word) => word.value);
+  const args = position.words.slice(position.index + 1);
   let afterPush = false;
   let expectC = false;
-  let hasC = false;
+  let anchoredDirectory = false;
   let expectRepo = false;
   let remote = "";
-  for (const arg of args) {
+  for (const word of args) {
+    const arg = word.value;
     if (expectC) {
-      hasC = true;
+      anchoredDirectory = word.literal && isAbsolute(arg);
       expectC = false;
       continue;
     }
     if (!afterPush) {
       if (arg === "-C") expectC = true;
-      else if (arg.length > 2 && arg.startsWith("-C")) hasC = true;
+      else if (arg.length > 2 && arg.startsWith("-C")) anchoredDirectory = word.literal && isAbsolute(arg.slice(2));
       else if (arg === "push") afterPush = true;
       continue;
     }
@@ -106,11 +107,11 @@ function gitPushInfo(position) {
     break;
   }
   if (!afterPush) return null;
-  return { hasC, remote };
+  return { anchoredDirectory, remote };
 }
 
 function pushDestinationExplicit(info) {
-  if (info.hasC) return true;
+  if (info.anchoredDirectory) return true;
   const remote = info.remote || "";
   if (remote.includes("://")) return true;
   return /^(?:git@(?:github|ssh\.github)\.com:|(?:github|ssh\.github)\.com\/)/.test(remote);
@@ -118,7 +119,7 @@ function pushDestinationExplicit(info) {
 
 function isDirectoryChange(position) {
   const tool = base(position.command?.value || "");
-  if (tool === "cd" || tool === "pushd" || tool === "popd") return true;
+  if (position.wrapperDirectoryChange || tool === "cd" || tool === "pushd" || tool === "popd") return true;
   if (tool === "builtin") {
     const name = position.words[position.index + 1]?.value;
     return name === "cd" || name === "pushd" || name === "popd";
@@ -135,15 +136,15 @@ function decision(command, root = defaultRoot) {
   }
   let directoryChanged = false;
   for (const { position } of positions) {
+    if (isDirectoryChange(position)) directoryChanged = true;
     const info = gitPushInfo(position);
     if (info && !pushDestinationExplicit(info) && directoryChanged) {
       return {
         decision: "deny",
         code: "protected-upstream-write",
-        reason: "git push after cd/pushd cannot be resolved to its repository locally; refusing before network access",
+        reason: "directory-dependent git push cannot be resolved to its repository locally; refusing before network access",
       };
     }
-    if (isDirectoryChange(position)) directoryChanged = true;
   }
   if (traversalError === "recursion limit") {
     return {

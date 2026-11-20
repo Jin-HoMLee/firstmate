@@ -506,11 +506,12 @@ function consumeWrapperOptions(name, words, index) {
   const short = WRAPPER_OPTIONS[optionOwner];
   const long = WRAPPER_LONG_OPTIONS[optionOwner];
   const embeddedPayloads = [];
+  let directoryChange = false;
   let next = index;
   while (words[next]) {
     const value = words[next].value;
-    if (value === "--") return { index: next + 1, unresolved: false, embeddedPayloads };
-    if (!value.startsWith("-") || value === "-") return { index: next, unresolved: false, embeddedPayloads };
+    if (value === "--") return { index: next + 1, unresolved: false, embeddedPayloads, directoryChange };
+    if (!value.startsWith("-") || value === "-") return { index: next, unresolved: false, embeddedPayloads, directoryChange };
     if (value.startsWith("--")) {
       const equals = value.indexOf("=");
       const option = value.slice(2, equals === -1 ? undefined : equals);
@@ -518,13 +519,14 @@ function consumeWrapperOptions(name, words, index) {
         next += 1;
         continue;
       }
-      if (!long.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads };
+      if (!long.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
+      if (name === "env" && option === "chdir") directoryChange = true;
       if (equals !== -1) {
         if (name === "env" && option === "split-string") embeddedPayloads.push(value.slice(equals + 1));
         next += 1;
         continue;
       }
-      if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads };
+      if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
       if (name === "env" && option === "split-string") embeddedPayloads.push(words[next + 1].value);
       next += 2;
       continue;
@@ -533,9 +535,10 @@ function consumeWrapperOptions(name, words, index) {
     for (let offset = 1; offset < value.length; offset += 1) {
       const option = value[offset];
       if (short.noArgument.has(option)) continue;
-      if (!short.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads };
+      if (!short.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
+      if (name === "env" && option === "C") directoryChange = true;
       if (offset + 1 === value.length) {
-        if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads };
+        if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
         if (name === "env" && option === "S") embeddedPayloads.push(words[next + 1].value);
         next += 2;
       } else {
@@ -547,7 +550,7 @@ function consumeWrapperOptions(name, words, index) {
     }
     if (!consumedArgument) next += 1;
   }
-  return { index: next, unresolved: false, embeddedPayloads };
+  return { index: next, unresolved: false, embeddedPayloads, directoryChange };
 }
 
 export function commandPosition(tokens) {
@@ -556,6 +559,7 @@ export function commandPosition(tokens) {
   while (index < words.length && isAssignment(words[index].value)) index += 1;
   const prefixAssignments = index;
   const wrappers = [];
+  let wrapperDirectoryChange = false;
   let unresolvedWrapperOption = false;
   const wrapperPayloads = [];
   let command = words[index];
@@ -576,6 +580,7 @@ export function commandPosition(tokens) {
     if (name === "env") {
       wrappers.push(name);
       const options = consumeWrapperOptions(name, words, index + 1);
+      wrapperDirectoryChange ||= options.directoryChange;
       unresolvedWrapperOption ||= options.unresolved;
       wrapperPayloads.push(...options.embeddedPayloads);
       index = options.index;
@@ -609,7 +614,7 @@ export function commandPosition(tokens) {
     }
     break;
   }
-  return { words, index, command, wrappers, prefixAssignments, unresolvedWrapperOption, wrapperPayloads };
+  return { words, index, command, wrappers, prefixAssignments, unresolvedWrapperOption, wrapperPayloads, wrapperDirectoryChange };
 }
 
 const PROTECTED_SCRIPTS = [
@@ -720,6 +725,7 @@ function shiftPastReservedWords(position) {
     prefixAssignments: position.prefixAssignments + unwrapped.prefixAssignments,
     unresolvedWrapperOption: position.unresolvedWrapperOption || unwrapped.unresolvedWrapperOption,
     wrapperPayloads: [...position.wrapperPayloads, ...unwrapped.wrapperPayloads],
+    wrapperDirectoryChange: position.wrapperDirectoryChange || unwrapped.wrapperDirectoryChange,
   };
 }
 
