@@ -776,6 +776,7 @@ A malformed, unreadable, or symlinked file - including one with a second directi
 
 Authority is also available for one task at a time: `--upstream-consent <host>/<owner>/<repo>` on `bin/fm-brief.sh`, `bin/fm-spawn.sh`, and `bin/fm-promote.sh` records the captain's explicit approval in the task's delivery contract and metadata without changing the home's role.
 Role is never inferred from GitHub identity, forge permissions, remotes, repository ownership, authentication state, environment, or CI.
+Neither a maintainer role nor task consent bypasses the separate [protected-upstream write guard](#protected-upstream-writes).
 `bin/fm-role.sh report` prints the resolved role with no network call, and the session-start digest shows it in the HOME ROLE subsection.
 
 `bin/fm-role-lib.sh` owns the fail-closed parser, self-repository detection, and the gate that `bin/fm-brief.sh`, `bin/fm-spawn.sh`, and `bin/fm-promote.sh` apply.
@@ -1955,13 +1956,33 @@ The optional local, gitignored `config/keep-ai-trailers` presence flag opts this
 With the flag absent, every Claude command line Firstmate builds carries inline `--settings` JSON with `"attribution":{"commit":"","pr":"","sessionUrl":false}`, every Devin worker config sets `"attribution": false`, and every fleet launch appends a worker-scoped `GIT_CONFIG` `core.hooksPath` entry pointing at `state/<id>.git-hooks`, where git's `commit-msg` hook strips known AI trailers even when a runtime injects them after the typed message.
 The entry follows any `GIT_CONFIG_*` entries the worker inherits, so an inherited scoped `credential.helper` still applies to the worker and to the repository's own hooks, such as a git-lfs `pre-push`; an inherited `GIT_CONFIG_COUNT` that is not a decimal number, or that leaves no room for another entry within Git's signed int, stops the launch before the worker runs.
 T3 Code owns its provider command and cannot carry Claude's inline setting, but its per-worktree environment overlay selects the same Git hook; [`t3code-backend.md`](t3code-backend.md#active-limits) owns that backend limit.
-When the flag is present, Claude launches omit those attribution-off settings, Devin worker configs keep the user config's `attribution` setting (Devin's default is on), and fleet launches do not install or select the strip hooks, so Git uses the repository's configured hooks directly.
+When the flag is present, Claude launches omit those attribution-off settings and Devin worker configs keep the user config's `attribution` setting (Devin's default is on); fleet launches still select the Git safety wrappers, but the `commit-msg` wrapper only chains the repository's own hook without stripping.
 Cortex Code has no attribution switch and its model writes a `Generated with Snowflake CoCo` line and a `Co-authored-by: Snowflake CoCo` trailer itself, so the strip hooks are the only mechanism that removes them from a Cortex worker's commits.
-`bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs when stripping is enabled.
+`bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs.
 A repository whose config sets `core.hooksPath` to the empty string runs no project hook, as in plain git; if the wrapper otherwise cannot resolve that repository's hooks directory, the git operation fails rather than silently skipping a project hook such as a pre-push guard.
-When stripping is enabled, the hooks directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
+The hooks directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
 The flag is a home-wide attribution choice, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract and a secondmate's own workers keep AI trailers too.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
+
+### Protected upstream writes
+
+Every launch prepends read-only `gh` and `gh-axi` shims and makes the generated `pre-push` hook refuse writes to protected `kunchenguid/*` upstream repositories, including when trailers are kept or an external-review push guard is installed; [`upstream-write-guard`](../.agents/skills/upstream-write-guard/SKILL.md) owns the exact captain-authorized exception and [`bin/fm-upstream-write-guard.sh`](../bin/fm-upstream-write-guard.sh) owns its mechanics and accepted deliberate-bypass residual.
+Primary shell checks are wired for Claude, Codex, Cursor, Grok, OpenCode 1 and 2, Pi/pi-signed, and omp, only in plain Firstmate checkouts where git-dir equals git-common-dir; they are inert in linked worktrees, including leased secondmate homes.
+Other primary harnesses do not register this guard.
+The transport allows commands when its input, dependencies or classifier response are unavailable or invalid, as specified in [`bin/fm-upstream-write-pretool-check.sh`](../bin/fm-upstream-write-pretool-check.sh); this is an agent-mistake seatbelt, not a sandbox or arbitrary-script inspection.
+The command guard supports API short-option clusters and attached field values, but refuses repository mutations with unsupported or ambiguous option ownership, even alongside help flags.
+Title, body and other option values never establish a repository destination: use `-R/--repo` on repository commands, an owner-qualified `gh repo` destination, or a REST API repository path, not an implicit default.
+PR/issue mutations refuse positional URL selectors even alongside an explicit repository; use an ordinary identifier with `-R/--repo` instead.
+API commands do not support `-R/--repo`; GraphQL mutations are unsupported even under an exact repository grant, while proved GraphQL reads and supported repository-scoped REST operations remain available.
+Help exempts a command from mutation checks only when all option ownership is supported; request help without additional options if necessary.
+Primary GitHub CLI checks also require literal arguments rather than shell-expanded selectors or query fields; use a literal command for supported reads and writes.
+The primary command check and authorization interface require each git push to name one explicit destination; the primary check also requires literal push arguments.
+An existing named remote must resolve through Git to exactly one effective push URL, while direct GitHub URLs or absolute local paths must not depend on URL rewrites.
+Multiple push URLs, rewrite-dependent direct URLs, `--config-env`, unsupported push options and omitted destinations are refused even under an exact repository grant; use a supported invocation and an existing single-destination named remote instead.
+In primary shell commands that change directory, a push also requires a literal absolute `git -C` anchor for the repository being checked, even when its remote is an explicit URL; subsequent relative `-C` paths retain Git's sequential interpretation.
+The primary guard must prove the literal Git subcommand and its preceding global options before granting a read exemption; variable-valued arguments after a proved literal read command remain supported.
+Pushes in shell programs with unproved command-local or exported Git configuration or user-environment changes, including `GIT_*`, `HOME`, `XDG_CONFIG_HOME` or `PATH` assignments, environment-changing `env` options or `sudo`, are refused rather than resolving under a different context; use an ordinary explicit push without those overrides.
+[`tests/fm-upstream-write-guard.test.sh`](../tests/fm-upstream-write-guard.test.sh) owns synthetic boundary regressions; those checks do not establish live harness or service verification.
 
 ## Project capacity (config/project-capacity)
 
@@ -3461,6 +3482,11 @@ The runner proves exactly one durability boundary: output that reached the runne
 - Never describe this path as at-least-once, no-loss, or lossless.
 
 `docs/verification/process-event-sources.md` holds the measurements and `.agents/skills/process-event-sources/SKILL.md` owns the handling procedure.
+
+## Private Telegram chat
+
+[`telegram.md`](telegram.md) owns the optional private-chat setup, local numeric identity approval, secret handling and delivery limits for `bin/fm-telegram.py`.
+It is default-off and reuses the existing inbox without changing worker dispatch or approval authority.
 
 ## Spoken interface and captain inbox (config/voice-*, config/inbox-*)
 

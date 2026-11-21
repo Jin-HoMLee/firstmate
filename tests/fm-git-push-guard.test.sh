@@ -140,6 +140,23 @@ EOF
   pass "push guard: the repository's own pre-push hook runs after the guard passes and still blocks"
 }
 
+test_upstream_protection_composes_with_external_guard() {
+  local out rc=0
+  fixture protected fm/ backup
+  # Invoke the generated hook with git's resolved URL, not a real network push.
+  out=$(cd "$FX_WT" && "$FX_HOOKS/pre-push" upstream git@github.com:kunchenguid/firstmate.git </dev/null 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "external-review hook lost upstream protection: $out"
+  assert_contains "$out" 'protected upstream' "upstream refusal was not reported"
+  # A kept-trailer home must select both guards too.
+  "$STRIP" install --no-strip --push-guard "$TMP_ROOT/protected/guard" "$FX_HOOKS" "$FX_WT" || fail "no-strip guarded install failed"
+  rc=0
+  out=$(cd "$FX_WT" && "$FX_HOOKS/pre-push" upstream git@github.com:kunchenguid/firstmate.git </dev/null 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "no-strip external-review hook lost upstream protection: $out"
+  push backup HEAD:refs/heads/backup/t1
+  [ "$PUSH_RC" -eq 0 ] || fail "combined guards refused the authorized local backup: $PUSH_OUT"
+  pass "external-review and kept-trailer hooks retain protected-upstream refusal"
+}
+
 test_unreadable_guard_refuses_everything() {
   local out rc
   out=$(printf 'refs/heads/a 1 refs/heads/a 0\n' | "$GUARD" "$TMP_ROOT/no-such-guard" other https://example.test/x 2>&1)
@@ -153,6 +170,7 @@ test_origin_pushes_are_refused
 test_backup_namespace_rules
 test_empty_prefix_still_refuses_the_task_branch
 test_repository_pre_push_still_chains
+test_upstream_protection_composes_with_external_guard
 test_unreadable_guard_refuses_everything
 
 echo "# all fm-git-push-guard tests passed"

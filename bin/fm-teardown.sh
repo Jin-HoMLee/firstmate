@@ -2997,9 +2997,10 @@ remove_firstmate_home() {  # <home> <label> <task-id> <backend>
     restore_firstmate_home_process_events "$abs_home_path" "$label" "$process_event_backup" || return $?
     return 1
   fi
-  # Read-only strip dirs sit at state/<id>.git-hooks, and a remote secondmate's
-  # own one under state/parent-route/, so search the whole state tree.
-  find "$abs_home_path/state" -type d -name '*.git-hooks' -exec chmod u+w {} + 2>/dev/null || true
+  # Read-only Git hook and GitHub shim dirs also live under state/parent-route/
+  # for remote secondmates, so search the whole state tree before home removal.
+  find "$abs_home_path/state" -type d \( -name '*.git-hooks' -o -name '*.github-guard-bin' \) \
+    -exec chmod u+w {} + 2>/dev/null || true
   if firstmate_home_has_treehouse_slot "$abs_home_path"; then
     command -v treehouse >/dev/null 2>&1 || {
       echo "error: treehouse command not found; cannot return $label $abs_home_path" >&2
@@ -3677,8 +3678,8 @@ cleanup_firstmate_home_children() {
       "$sub_state/$child_id.polytoken-busy.sh" \
       "$sub_state/.$child_id.branch-outcome-index"
     rm -rf "$sub_state/$child_id.kiro-home"
-    chmod u+w "$sub_state/$child_id.git-hooks" 2>/dev/null || true
-    rm -rf "$sub_state/$child_id.git-hooks" "$sub_state/$child_id.push-guard" \
+    chmod u+w "$sub_state/$child_id.git-hooks" "$sub_state/$child_id.github-guard-bin" 2>/dev/null || true
+    rm -rf "$sub_state/$child_id.git-hooks" "$sub_state/$child_id.github-guard-bin" "$sub_state/$child_id.push-guard" \
       "$sub_state/$child_id.cortex-plugin" "$sub_state/$child_id.hermes-hooks" \
       "$sub_state/$child_id.polytoken-config" \
       "$sub_state/$child_id.polytoken-sessions" \
@@ -4230,17 +4231,17 @@ rm -rf "$STATE/$ID.kiro-home"
 # The steering inbox (bin/fm-task-inbox-lib.sh) is runtime state for the
 # retired endpoint; teardown only runs after landing is confirmed, so any
 # leftover unhandled steer here is moot rather than unlanded work.
-# state/<id>.git-hooks is the spawn-owned commit-msg strip directory, left
-# read-only by its installer, and state/<id>.push-guard is a forge=external
-# task's read-only push guard record (bin/fm-git-push-guard.sh).
-chmod u+w "$STATE/$ID.git-hooks" 2>/dev/null || true
+# The spawn-owned git hook and GitHub guard directories are left read-only by
+# their installers; state/<id>.push-guard is a forge=external task's read-only
+# push guard record (bin/fm-git-push-guard.sh).
+chmod u+w "$STATE/$ID.git-hooks" "$STATE/$ID.github-guard-bin" 2>/dev/null || true
 # A task's polytoken config dir and sessions roots are directory trees (the
 # mirrored worker config and the versioned session tree the launch wrote
 # beside its sessions root), so they are removed recursively with the inbox
 # and the git-hooks dir rather than the flat file list above.
 # state/<id>.cortex-plugin is the per-task Cortex Code plugin directory
 # (bin/fm-cortex-plugin.sh) carrying the busy-state hooks.
-rm -rf "$STATE/$ID.inbox" "$STATE/$ID.git-hooks" "$STATE/$ID.push-guard" \
+rm -rf "$STATE/$ID.inbox" "$STATE/$ID.git-hooks" "$STATE/$ID.github-guard-bin" "$STATE/$ID.push-guard" \
   "$STATE/$ID.cortex-plugin" "$STATE/$ID.hermes-hooks" \
   "$STATE/$ID.polytoken-config" \
   "$STATE/$ID.polytoken-sessions" "$STATE/$ID.polytoken-sessions-v1"

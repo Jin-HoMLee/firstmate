@@ -26,7 +26,7 @@ BASE_PATH=${FM_TEST_BASE_PATH:-$PYTHON_BIN_DIR:/usr/bin:/bin:/usr/sbin:/sbin}
 task_inbox_export() {  # <home> <id>
   local state
   state=$(CDPATH='' cd -- "$1/state" && pwd -P) || fail "cannot resolve state dir $1/state"
-  printf "export FM_TASK_INBOX='%s'; " "$state/$2.inbox"
+  printf "export FM_TASK_INBOX='%s'; export PATH='%s':\$PATH; " "$state/$2.inbox" "$state/$2.github-guard-bin"
 }
 
 

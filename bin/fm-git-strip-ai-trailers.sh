@@ -31,6 +31,8 @@
 #       the pre-push wrapper run bin/fm-git-push-guard.sh on it first, with
 #       git's arguments and ref lines, chaining to the repository's pre-push
 #       hook only when the guard passes (that script owns the rules).
+#       Every pre-push wrapper first runs fm-upstream-write-guard.sh against
+#       git's resolved remote URL, including with --no-strip or --push-guard.
 #   fm-git-strip-ai-trailers.sh env-file <hooks-dir> <out-file>
 #       Write <out-file> as one plain export statement that appends
 #       core.hooksPath=<hooks-dir> after the GIT_CONFIG_COUNT entries this
@@ -77,6 +79,7 @@ set -u
 unset CDPATH
 
 SELF="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+UPSTREAM_GUARD="$(dirname "$SELF")/fm-upstream-write-guard.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -320,6 +323,7 @@ EOF
     write_executable "$hooks_dir/pre-push" <<EOF
 #!/usr/bin/env bash
 set -u
+$(quote_for_hook "$UPSTREAM_GUARD") pre-push "\${1:-}" "\${2:-}" || exit \$?
 refs=\$(cat)
 if [ -n "\$refs" ]; then
   printf '%s\\n' "\$refs" | $guard_cmd "\$@" || exit 1
@@ -334,11 +338,20 @@ EOF
 
   for name in $FM_GIT_CLIENT_HOOKS; do
     [ -z "$guard_src" ] || [ "$name" != pre-push ] || continue
-    write_executable "$hooks_dir/$name" <<EOF
+    if [ "$name" = pre-push ]; then
+      write_executable "$hooks_dir/$name" <<EOF
+#!/usr/bin/env bash
+set -u
+$(quote_for_hook "$UPSTREAM_GUARD") pre-push "\${1:-}" "\${2:-}" || exit \$?
+$(runtime_chain_body "$hooks_dir")
+EOF
+    else
+      write_executable "$hooks_dir/$name" <<EOF
 #!/usr/bin/env bash
 set -u
 $(runtime_chain_body "$hooks_dir")
 EOF
+    fi
   done
   chmod 500 "$hooks_dir"
 }

@@ -52,6 +52,7 @@ Publishing to this repository's upstream requires `config/firstmate-role`'s main
 Load `firstmate-self-repo` before dispatching, promoting, or delivering work that targets this repository, when a firstmate bug or improvement idea surfaces in ordinary use, and before granting or revoking upstream publication authority.
 Never add an agent name as a commit co-author.
 Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and compatible `lavish-axi` for visual decisions or reports; consult current help rather than memorizing flags.
+Load `upstream-write-guard` before any write to a `kunchenguid/*` repository; ordinary GitHub and git paths block those writes.
 
 ## 2. Layout and state
 

@@ -131,7 +131,7 @@ make_seeded_secondmate_home() {
 task_inbox_export() {  # <home> <id>
   local state
   state=$(CDPATH='' cd -- "$1/state" && pwd -P) || fail "cannot resolve state dir $1/state"
-  printf "export FM_TASK_INBOX='%s'; " "$state/$2.inbox"
+  printf "export FM_TASK_INBOX='%s'; export PATH='%s':\$PATH; " "$state/$2.inbox" "$state/$2.github-guard-bin"
 }
 
 
@@ -2317,7 +2317,20 @@ test_claude_crewmate_launch_carries_the_attribution_policy() {
   pass "a claude crewmate launch carries the attribution-off policy in its own settings"
 }
 
-test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks() {
+assert_keep_trailers_with_upstream_safety() {  # <home> <id> <worktree>
+  local hooks="$1/state/$2.git-hooks" msg="$1/message" out status=0
+  printf 'subject\n\nCo-authored-by: Claude <noreply@anthropic.com>\n' > "$msg"
+  # Select this worker's hooks, not an outer fleet pane's inherited hooksPath.
+  (cd "$3" && unset GIT_CONFIG_PARAMETERS &&
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$hooks" \
+    "$hooks/commit-msg" "$msg") || fail "keep-trailers hook failed"
+  assert_contains "$(cat "$msg")" 'Co-authored-by: Claude' "keep-trailers stripped attribution"
+  out=$(cd "$3" && "$hooks/pre-push" upstream git@github.com:kunchenguid/firstmate.git </dev/null 2>&1) || status=$?
+  [ "$status" -eq 2 ] || fail "keep-trailers lost the protected-upstream push guard: $out"
+  [ -x "$1/state/$2.github-guard-bin/gh-axi" ] || fail "keep-trailers lost the GitHub guard shim"
+}
+
+test_keep_ai_trailers_omits_attribution_settings_but_keeps_safety_hooks() {
   local rec id out status launch
   id=profile-claude-keep-attribution-z25
   rec=$(make_spawn_case profile-claude-keep-attribution claude "$id")
@@ -2329,11 +2342,8 @@ test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks() {
   expect_code 0 "$status" "claude spawn with keep-ai-trailers should succeed"$'\n'"$out"
   launch=$(fm_test_launch_unframe "$(cat "$LAUNCH_LOG")")
   assert_attribution_policy_absent "$launch" "opted-in claude"
-  assert_not_contains "$launch" 'fm-git-strip-ai-trailers.sh' \
-    "opted-in launch still overrides the repository hooksPath"
-  [ ! -e "$HOME_DIR/state/$id.git-hooks" ] \
-    || fail "opted-in launch installed AI trailer strip hooks"
-  pass "keep-ai-trailers omits Claude attribution settings and the pane strip hooks"
+  assert_keep_trailers_with_upstream_safety "$HOME_DIR" "$id" "$WT_DIR"
+  pass "keep-ai-trailers omits attribution suppression while keeping upstream-write protection"
 }
 
 test_keep_ai_trailers_reaches_secondmate_crew_launches() {
@@ -2359,10 +2369,7 @@ test_keep_ai_trailers_reaches_secondmate_crew_launches() {
   expect_code 0 "$status" "secondmate crew spawn should succeed"$'\n'"$out"
   launch=$(fm_test_launch_unframe "$(cat "$LAUNCH_LOG")")
   assert_attribution_policy_absent "$launch" "secondmate crew claude"
-  assert_not_contains "$launch" 'fm-git-strip-ai-trailers.sh' \
-    "secondmate crew launch still overrides the repository hooksPath"
-  [ ! -e "$HOME_DIR/state/$crew_id.git-hooks" ] \
-    || fail "secondmate crew launch installed AI trailer strip hooks"
+  assert_keep_trailers_with_upstream_safety "$HOME_DIR" "$crew_id" "$WT_DIR"
   pass "keep-ai-trailers is inherited so a secondmate's crew launch keeps AI trailers"
 }
 
@@ -2445,8 +2452,8 @@ SH
         enabled) expected=$(printf '%s\n' unset "$value" '' unset) ;;
         empty) expected=$(printf '%s\n' unset unset unset unset) ;;
       esac
-      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
-      # The strip-hook entry must also survive the env -i boundary.
+      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$HOME_DIR/state/$id.github-guard-bin:$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
+      # The safety-hook entry must also survive the env -i boundary.
       expected="$expected"$'\n'"hooksPath=$(cd "$HOME_DIR/state" && pwd -P)/$id.git-hooks"
       [ "$result" = "$expected" ] || fail "allowlist=$setting worker environment mismatch: $result"
     done
@@ -3110,7 +3117,7 @@ test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
 test_claude_long_launch_is_delivered_intact
 test_claude_crewmate_launch_carries_the_attribution_policy
-test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks
+test_keep_ai_trailers_omits_attribution_settings_but_keeps_safety_hooks
 test_keep_ai_trailers_reaches_secondmate_crew_launches
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch

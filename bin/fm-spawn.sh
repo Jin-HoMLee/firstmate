@@ -710,14 +710,13 @@
 # ~/.cursor/cli-config.json attribution-off is not durable (it does not travel
 # with this repo, defaults back to on when unset, and only feeds the CLI's
 # request to the server, so it suppresses the trailer rather than preventing
-# it). Unless config/keep-ai-trailers is present, every spawn installs
-# state/<id>.git-hooks as an appended GIT_CONFIG core.hooksPath entry for the pane, so git
-# commit-msg strips known AI trailers at the commit object for every launched
-# runtime, Claude included as defense in depth. bin/fm-git-strip-ai-trailers.sh
-# owns the identities, the hook install, and chaining the repository git is
-# actually running in so a project husky hook still runs. Author identity is
-# not rewritten. A forge=external ship installs that directory even under
-# config/keep-ai-trailers, because its pre-push wrapper carries the push guard.
+# it). Every spawn selects state/<id>.git-hooks for upstream-write safety;
+# docs/configuration.md "Protected upstream writes" owns that boundary.
+# Unless config/keep-ai-trailers is present, commit-msg also strips known AI
+# trailers at the commit object for every launched runtime, Claude included as
+# defense in depth. bin/fm-git-strip-ai-trailers.sh owns the identities, the hook
+# install, and chaining the repository git is actually running in so a project
+# husky hook still runs. Author identity is not rewritten.
 # T3 Code owns its provider command, so it cannot receive Claude's inline
 # attribution settings; the Git hook and environment overlay still apply.
 # Publishing the record and moving this home's backlog item to In flight are one
@@ -1730,6 +1729,7 @@ RELAUNCH_REPLACEMENT_WT=
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 GIT_HOOKS_DIR=
+GITHUB_GUARD_DIR=
 SPAWN_LAUNCH_SENT=0
 SPAWN_ENDPOINT_CLOSED=0
 SPAWN_STAGED_LAUNCH_FILE=
@@ -2060,8 +2060,8 @@ spawn_abort_cleanup() {
     { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; } &&
     fm_lock_try_acquire "$SPAWN_TASK_LOCK"; then
     if [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
-      chmod u+w "$GIT_HOOKS_DIR" 2>/dev/null || true
-      rm -rf "$GIT_HOOKS_DIR" 2>/dev/null || true
+      chmod u+w "$GIT_HOOKS_DIR" "$GITHUB_GUARD_DIR" 2>/dev/null || true
+      rm -rf "$GIT_HOOKS_DIR" "$GITHUB_GUARD_DIR" 2>/dev/null || true
     fi
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
@@ -7227,13 +7227,13 @@ EOF
     ;;
   esac
 
-# Per-task git hooksPath that strips AI commit trailers at the commit object.
-# Installed for every kind, including secondmate, unless the home opts in to
-# keeping trailers. Cursor and other non-Claude runtimes inject the trailer
-# after the typed message, so the typed message is not the object. When
-# installed, the pane receives this directory via GIT_CONFIG_* below, which
-# overrides a project's husky core.hooksPath without rewriting it; the installer
-# chains the previous hooks so they still run. Real secondmate
+# Every launch receives git hooks that block protected-upstream pushes and
+# PATH shims that classify gh and gh-axi before either CLI runs. The commit-msg
+# wrapper also strips AI trailers unless the home opts in to keeping them.
+# Cursor and other non-Claude runtimes inject trailers after the typed message,
+# so the hook sees the actual object. GIT_CONFIG_* selects the hooks without
+# rewriting project config, and the wrappers chain the repository's own hooks.
+# Real secondmate
 # homes are firstmate clones; a launch whose worktree is not git fails closed
 # rather than shipping a runtime that cannot strip.
 # A forge=external ship always gets this directory, because its pre-push
@@ -7241,12 +7241,12 @@ EOF
 # home that keeps trailers gets a commit-msg wrapper that only chains.
 GIT_HOOKS_DIR="$STATE_REAL/$ID.git-hooks"
 GIT_HOOKS_INSTALLED=0
+strip_args=()
+[ "$KEEP_AI_TRAILERS" = 0 ] || strip_args=(--no-strip)
 if [ "$EXTERNAL_REVIEW" = 1 ]; then
   PUSH_GUARD_FILE="$STATE_REAL/$ID.push-guard"
   guard_args=("$PUSH_GUARD_FILE" "$WT" "$BRANCH" "$(fm_ship_branch_prefix "$BRANCH" "$ID")")
   [ -z "$EXTERNAL_BACKUP_REMOTE" ] || guard_args+=("$EXTERNAL_BACKUP_REMOTE" "$EXTERNAL_BACKUP_PREFIX")
-  strip_args=()
-  [ "$KEEP_AI_TRAILERS" = 0 ] || strip_args=(--no-strip)
   { "$FM_ROOT/bin/fm-git-push-guard.sh" write "${guard_args[@]}" \
     && "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "${strip_args[@]+"${strip_args[@]}"}" \
       --push-guard "$PUSH_GUARD_FILE" "$GIT_HOOKS_DIR" "$WT"; } || {
@@ -7254,13 +7254,18 @@ if [ "$EXTERNAL_REVIEW" = 1 ]; then
     exit 1
   }
   GIT_HOOKS_INSTALLED=1
-elif [ "$KEEP_AI_TRAILERS" = 0 ]; then
-  "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "$GIT_HOOKS_DIR" "$WT" || {
-    echo "error: could not install the AI-trailer strip hooks for $ID" >&2
+else
+  "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "${strip_args[@]+"${strip_args[@]}"}" "$GIT_HOOKS_DIR" "$WT" || {
+    echo "error: could not install the git safety hooks for $ID" >&2
     exit 1
   }
   GIT_HOOKS_INSTALLED=1
 fi
+GITHUB_GUARD_DIR="$STATE_REAL/$ID.github-guard-bin"
+"$FM_ROOT/bin/fm-upstream-write-guard.sh" install-shims "$GITHUB_GUARD_DIR" || {
+  echo "error: could not install the GitHub upstream-write guard for $ID" >&2
+  exit 1
+}
 
 # Delivery posture recorded in meta so fm-teardown's safety check and the
 # validate/merge stages can branch on it. A ship task carries the explicit
@@ -7770,9 +7775,9 @@ esac
 LAUNCH_DIR="/tmp/fm-$ID+$LAUNCH_HOME_TOKEN"
 # Pane-scoped override: git in this worker reads our commit-msg strip without
 # rewriting the project's core.hooksPath. GIT_CONFIG_* takes precedence over
-# config files and is inherited by child git processes. When the home opts in
-# to keeping trailers, leave core.hooksPath alone so the repository's hooks run
-# directly. An export statement inside the pane command carries the override
+# config files and is inherited by child git processes. The upstream-write
+# protection remains installed even when the home opts in to keeping trailers.
+# An export statement inside the pane command carries the override
 # across every step of a compound raw launch while firstmate's own git is unchanged.
 # The helper appends after the GIT_CONFIG_COUNT entries the worker actually
 # inherits (after any launch environment filtering), so credential.helper and
@@ -7839,6 +7844,7 @@ fi
 # "$FM_TASK_INBOX" instead of a path that grows with the home's depth. Like the
 # kill switch below it is an export statement, so it survives a compound raw
 # launch and the launch-env-allowlist `env -i` wrapper.
+LAUNCH="export PATH=$(shell_quote "$GITHUB_GUARD_DIR"):\$PATH; $LAUNCH"
 LAUNCH="export FM_TASK_INBOX=$(shell_quote "$STATE_REAL/$ID.inbox"); $LAUNCH"
 LAUNCH="export COMPACT_ADVISER_DISABLE=1; $LAUNCH"
 # When the live-harness gate has exported DISABLE_AUTOUPDATER into this spawn's
@@ -7887,7 +7893,7 @@ if [ "$BACKEND" = t3code ]; then
   # (spawn_t3code_env_install). TRACEPARENT is delivered only once its meta
   # record exists, the same delivered-implies-recorded invariant the pane path
   # keeps by unsetting it when the record fails.
-  T3CODE_ENV=("GOTMPDIR=$TASK_TMP/gotmp" COMPACT_ADVISER_DISABLE=1 "FM_TASK_INBOX=$STATE_REAL/$ID.inbox")
+  T3CODE_ENV=("GOTMPDIR=$TASK_TMP/gotmp" COMPACT_ADVISER_DISABLE=1 "FM_TASK_INBOX=$STATE_REAL/$ID.inbox" "PATH=$GITHUB_GUARD_DIR:$PATH")
   if [ "$GIT_HOOKS_INSTALLED" = 1 ]; then
     T3CODE_ENV+=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath "GIT_CONFIG_VALUE_0=$GIT_HOOKS_DIR")
   fi
@@ -7926,6 +7932,8 @@ spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
 # pre-launch channel, so later commands in that shell inherit it too. The launch
 # command independently establishes the value for the agent process itself.
 spawn_send_text_line "$T" "export COMPACT_ADVISER_DISABLE=1"
+# Guard later commands in the pane as well as the agent's launch.
+spawn_send_text_line "$T" "export PATH=$(shell_quote "$GITHUB_GUARD_DIR"):\$PATH"
 if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
   spawn_send_text_line "$T" "export LAVISH_AXI_HOST=$(shell_quote "$LAVISH_AXI_HOST")"
 fi

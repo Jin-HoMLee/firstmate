@@ -4,7 +4,7 @@ This document is the authoritative human-readable contract for the watcher arm P
 `bin/fm-arm-command-policy.mjs` is the single semantic owner.
 `bin/fm-arm-pretool-check.sh` is only the stable harness transport and output renderer.
 The tracked harness adapters forward command text without classifying it.
-`bin/fm-arm-command-policy.mjs` is also the sole owner of firstmate's shell classification: it exports the tokenizer and command-position analysis, which the sibling cd-guard seatbelt (`bin/fm-cd-pretool-check.sh`, `docs/cd-guard.md`) reuses instead of duplicating shell lexing.
+`bin/fm-arm-command-policy.mjs` is also the sole owner of firstmate's shell classification: it exports the tokenizer and command-position analysis, which the sibling cd-guard seatbelt (`bin/fm-cd-pretool-check.sh`, `docs/cd-guard.md`) and the upstream-write guard (`bin/fm-upstream-write-pretool-check.sh`, `.agents/skills/upstream-write-guard/SKILL.md`) reuse instead of duplicating shell lexing.
 
 ## Purpose and boundary
 
@@ -78,10 +78,10 @@ A direct `bin/fm-watch.sh` execution - relative, `<code-root>`-anchored, `$VAR`-
 
 The same bytes in an argument, comment, assertion, documentation query, Python string, `printf`, or `tmux send-keys` payload are data and do not make the outer command relevant.
 
-Literal `sh`, `bash`, or `zsh` `-c` payloads and literal `eval` payloads are recursively classified.
-A literal nested payload that only runs a data-bearing command is allowed.
-A literal nested payload that executes a protected command is denied as `watcher-nested`, even when that inner protected call would be allowed at top level.
-A heredoc or literal here-string fed to a shell that reads its program from stdin is classified the same way.
+The visible cooked text of `sh`, `bash`, or `zsh` `-c` payloads and `eval` payloads is recursively classified, including visible command text alongside unresolved expansions.
+A nested payload that only runs a data-bearing command is allowed.
+A nested payload whose visible text executes a protected command is denied as `watcher-nested`, even when that inner protected call would be allowed at top level.
+A heredoc or here-string fed to a shell that reads its program from stdin is classified the same way.
 With `-s`, later operands set positional parameters rather than naming a script, so `bash -s sentinel <<< 'bin/fm-watch.sh'` is denied.
 An operand after `-s --` remains positional, while a protected watcher path in the first operand position is still denied.
 

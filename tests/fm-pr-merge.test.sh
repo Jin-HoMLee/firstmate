@@ -808,6 +808,49 @@ write_away_record() {
     "$ROOT/bin/fm-afk-contract.sh" enter "$@" >/dev/null
 }
 
+test_protected_upstream_lifecycle_merge_refuses() {
+  local case_dir mode rc
+  for mode in ordinary attended away update; do
+    case_dir=$(make_case "protected-upstream-$mode")
+    add_gh_mocks "$case_dir" 5151515151515151515151515151515151515151
+    set --
+    case "$mode" in
+      attended) set -- --attended-override -- --admin ;;
+      away)
+        printf '\nyolo=on\n' >> "$case_dir/state/task-x1.meta"
+        write_away_record "$case_dir"
+        ;;
+      update)
+        set -- --update-branch
+        "$JQ_BIN" '.mergeStateStatus = "BEHIND"' "$case_dir/github-view.json" > "$case_dir/behind.json"
+        mv "$case_dir/behind.json" "$case_dir/github-view.json"
+        ;;
+    esac
+    rc=0
+    run_pr_merge "$case_dir" task-x1 https://github.com/kunchenguid/firstmate/pull/9 "$@" \
+      > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+    expect_code 2 "$rc" "protected-upstream-$mode: the lifecycle entrypoint must refuse"
+    assert_grep 'exact captain-authorized interface' "$case_dir/stderr" \
+      "protected-upstream-$mode: missing the protected-upstream refusal"
+    assert_no_grep '^pr merge\|/update-branch' "$case_dir/gh.log" \
+      "protected-upstream-$mode: a protected mutation reached the forge"
+  done
+  pass "fm-pr-merge refuses protected upstream mutations regardless of lifecycle merge authority"
+}
+
+test_personal_fork_lifecycle_merge_remains_allowed() {
+  local case_dir
+  case_dir=$(make_case personal-fork-authorized-merge)
+  add_gh_mocks "$case_dir" 5151515151515151515151515151515151515151
+  run_pr_merge "$case_dir" task-x1 https://github.com/Jin-HoMLee/firstmate/pull/9 \
+    --attended-override -- --admin > "$case_dir/stdout" 2> "$case_dir/stderr" \
+    || fail "personal-fork merge should remain allowed: $(cat "$case_dir/stderr")"
+  assert_logged_gh_merge "$case_dir" 9 Jin-HoMLee/firstmate --squash --admin
+  assert_grep 'verified: https://github.com/Jin-HoMLee/firstmate/pull/9 is merged' \
+    "$case_dir/stdout" "personal-fork merge did not confirm its outcome"
+  pass "fm-pr-merge preserves explicitly authorized personal-fork merges"
+}
+
 test_verified_merge_records_pr_and_head() {
   local case_dir rc
   case_dir=$(make_case records-before-merge)
@@ -3550,6 +3593,8 @@ test_github_updated_head_other_refusals_stop_waiting() {
   pass "fm-pr-merge immediately refuses draft, closed, conflicting, or unreadable updated heads despite pending or missing checks"
 }
 
+test_protected_upstream_lifecycle_merge_refuses
+test_personal_fork_lifecycle_merge_remains_allowed
 test_github_updated_head_other_refusals_stop_waiting
 test_github_behind_update_refuses_concurrent_head_change
 test_github_zero_exit_queue_required_refuses_with_exact_retry

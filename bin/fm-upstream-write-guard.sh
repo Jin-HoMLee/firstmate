@@ -1,0 +1,757 @@
+#!/usr/bin/env bash
+# Block GitHub repository writes to github.com/kunchenguid/* before the
+# network mutation starts.
+#
+# Public interfaces:
+#   fm-upstream-write-guard.sh install-shims <directory>
+#     Recreates <directory> with gh and gh-axi wrappers. Put it first on PATH.
+#   fm-upstream-write-guard.sh cli <shim-directory> <gh|gh-axi> [args...]
+#     Wrapper entrypoint. Read operations pass through. Repository mutations
+#     require an explicit repository selector, and protected repositories stop.
+#   fm-upstream-write-guard.sh pre-push <remote-name> <remote-url>
+#     Git pre-push entrypoint. Protected GitHub remotes stop before git sends
+#     ref updates. The hook consumes no stdin, so a chained project hook keeps
+#     the complete ref stream.
+#   fm-upstream-write-guard.sh check <gh|gh-axi|git> [args...]
+#     Local-only classifier used by the primary PreToolUse guard.
+#   fm-upstream-write-guard.sh authorize --repo <owner/name>
+#       --captain-words-file <path> -- <gh|gh-axi|git> [args...]
+#     The only override. It is primary-only, requires an exact protected repo,
+#     exact captain words in a regular file, and a command whose locally proved
+#     destination is that same repo. It writes an audit record before executing.
+#
+# The classifier never contacts GitHub. For gh and gh-axi, every repository
+# mutation must name its repository with -R/--repo, a repo positional argument,
+# or an API /repos/<owner>/<repo>/ path. This deliberately refuses mutation commands that
+# rely on fork-aware default resolution: gh may select a fork's parent even
+# when origin is the personal fork. Read-only commands stay available with or
+# without a selector. gh api graphql mutations are unsupported, including under
+# authorize, because query-body targets cannot be verified locally. The API
+# command does not support -R/--repo; REST repository paths supply its target.
+# Note: git push --no-verify skips the pre-push check and is an accepted, deliberate-action-only residual.
+set -u
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P) || exit 1
+FM_ROOT=${FM_ROOT_OVERRIDE:-$(CDPATH='' cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)}
+PROTECTED_OWNER=kunchenguid
+
+usage() {
+  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+die() { printf 'error: %s\n' "$1" >&2; exit 2; }
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+normalize_repo() {
+  local value=$1 host path lower_value
+  value=${value%/}
+  value=${value%.git}
+  case "$(lower "$value")" in
+    https://*|http://*|ssh://*|git://*|git+ssh://*|ssh+git://*)
+      host=${value#*://}
+      host=${host#*@}
+      path=${host#*/}
+      host=${host%%/*}
+      host=${host%%:*}
+      case "$(lower "$host")" in
+        github.com|ssh.github.com|api.github.com) ;;
+        *) return 1 ;;
+      esac
+      value=$path
+      ;;
+  esac
+  lower_value=$(lower "$value")
+  case "$lower_value" in
+    git@github.com:*|git@ssh.github.com:*|github.com:*|ssh.github.com:*) value=${value#*:} ;;
+    github.com/*|ssh.github.com/*) value=${value#*/} ;;
+  esac
+  value=${value#repos/}
+  value=${value#/repos/}
+  value=${value#/}
+  value=${value%%\?*}
+  value=${value%%\#*}
+  # API paths carry more segments; owner/name is the repository identity.
+  case "$value" in */*) value=$(printf '%s' "$value" | awk -F/ '{print $1 "/" $2}') ;; *) return 1 ;; esac
+  case "$value" in
+    */*) ;;
+    *) return 1 ;;
+  esac
+  case "$value" in *[!A-Za-z0-9_./-]*|*//*|/*|*/|*/*/*) return 1 ;; esac
+  printf '%s\n' "$(lower "${value%%/*}")/${value#*/}"
+}
+
+repo_is_protected() {
+  local repo
+  repo=$(normalize_repo "$1" 2>/dev/null) || return 1
+  [ "${repo%%/*}" = "$PROTECTED_OWNER" ]
+}
+
+fork_org() {
+  local arg expect_org=0 protected=0
+  for arg in "$@"; do
+    if [ "$expect_org" -eq 1 ]; then
+      expect_org=0
+      [ "$(lower "$arg")" = "$PROTECTED_OWNER" ] && protected=1
+      continue
+    fi
+    case "$arg" in
+      --org) expect_org=1 ;;
+      --org=*) [ "$(lower "${arg#--org=}")" = "$PROTECTED_OWNER" ] && protected=1 ;;
+    esac
+  done
+  [ "$protected" -eq 1 ]
+}
+
+repo_destination() {
+  local arg expect_repo=0
+  shift
+  for arg in "$@"; do
+    if [ "$expect_repo" -eq 1 ]; then expect_repo=0; continue; fi
+    case "$arg" in
+      -R|--repo) expect_repo=1 ;;
+      */*) set_target "$arg" repo-positional; break ;;
+    esac
+  done
+}
+
+issue_transfer_destination() {
+  local arg expect_repo=0
+  for arg in "$@"; do
+    if [ "$expect_repo" -eq 1 ]; then expect_repo=0; continue; fi
+    case "$arg" in
+      -R|--repo) expect_repo=1; continue ;;
+      --repo=*|-R?*) continue ;;
+      -*) continue ;;
+      http://*|https://*) continue ;;
+      */*) printf '%s\n' "$arg"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+repo_subsubcommand() {
+  local arg expect_repo=0 positional=0
+  for arg in "$@"; do
+    if [ "$expect_repo" -eq 1 ]; then expect_repo=0; continue; fi
+    case "$arg" in
+      -R|--repo) expect_repo=1; continue ;;
+      --repo=*|-R?*) continue ;;
+      -*) continue ;;
+    esac
+    positional=$((positional + 1))
+    if [ "$positional" -le 2 ]; then continue; fi
+    printf '%s\n' "$arg"
+    return 0
+  done
+  return 1
+}
+
+TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD='' MUTATION=0 REPO_SCOPED=0
+set_target() {
+  local candidate normalized
+  candidate=$1
+  normalized=$(normalize_repo "$candidate" 2>/dev/null) || { TARGET_UNPROVED=1; return 0; }
+  if [ -n "$TARGET" ] && [ "$(lower "$TARGET")" != "$(lower "$normalized")" ]; then
+    TARGET=AMBIGUOUS
+    return 0
+  fi
+  TARGET=$normalized
+  : "$2"
+}
+
+gh_option_kind() {
+  local top=$1 sub=$2 option=$3
+  GH_OPTION_KIND=unknown
+  case "$top/$sub/$option" in repo/create/-h|repo/edit/-h) GH_OPTION_KIND=value; return ;; esac
+  case "$option" in
+    -h|--help|--version) GH_OPTION_KIND=help; return ;;
+    -R|--repo) GH_OPTION_KIND=repo; return ;;
+  esac
+  if [ "$top" = api ]; then
+    case "$option" in
+      -X|--method) GH_OPTION_KIND=method ;;
+      -f|-F|--field|--raw-field) GH_OPTION_KIND=field ;;
+      --input) GH_OPTION_KIND=input ;;
+      -H|--header|-q|--jq|-t|--template|--hostname|--cache|-p|--preview) GH_OPTION_KIND=value ;;
+      -i|--include|--silent|--paginate|--slurp|--verbose) GH_OPTION_KIND=boolean ;;
+    esac
+    return
+  fi
+  case "$top/$sub/$option" in
+    pr/create/-d|pr/create/--draft|pr/create/--fill|pr/create/--fill-first|pr/create/--fill-verbose|pr/create/-w|pr/create/--web|pr/create/-e|pr/create/--editor|pr/create/--dry-run|pr/create/--no-maintainer-edit)
+      GH_OPTION_KIND=boolean ;;
+    pr/create/-t|pr/create/--title|pr/create/-b|pr/create/--body|pr/create/-F|pr/create/--body-file|pr/create/-B|pr/create/--base|pr/create/-H|pr/create/--head|pr/create/-r|pr/create/--reviewer|pr/create/-a|pr/create/--assignee|pr/create/-l|pr/create/--label|pr/create/-m|pr/create/--milestone|pr/create/-p|pr/create/--project|pr/create/--recover)
+      GH_OPTION_KIND=value ;;
+    repo/create/-t|repo/create/--template|repo/view/-t|repo/view/--template) GH_OPTION_KIND=value ;;
+    repo/edit/--template) GH_OPTION_KIND=boolean ;;
+    issue/create/--title|issue/create/-t|issue/create/--body|issue/create/-b|secret/set/-v|secret/set/--visibility|variable/set/-v|variable/set/--visibility) GH_OPTION_KIND=value ;;
+  esac
+  if [ "$top" = repo ]; then
+    case "$option" in
+      -b|--branch|-q|--jq|-d|--description|--homepage|-s|--source|-g|--gitignore|-l|--license|-r|--remote|-p|--team|--json|--fork-name|--org|--remote-name|--default-branch|--add-topic|--remove-topic|--squash-merge-commit-message|--visibility) GH_OPTION_KIND=value ;;
+    esac
+  fi
+}
+
+normalize_gh_arguments() {
+  local top='' sub='' arg option value tail kind attached options=1
+  GH_ARGS=() GH_DESTINATION_ARGS=() GH_HELP=0 GH_OPTIONS_KNOWN=1 GH_POSITIONAL_URL=0 GH_HAS_REPO_OPTION=0
+  while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
+    if [ "$options" -eq 0 ]; then GH_ARGS+=("$arg"); GH_DESTINATION_ARGS+=("$arg"); continue; fi
+    case "$arg" in
+      --) options=0; GH_OPTIONS_KNOWN=0; GH_ARGS+=("$arg"); continue ;;
+      -?*) ;;
+      *)
+        GH_ARGS+=("$arg")
+        GH_DESTINATION_ARGS+=("$arg")
+        case "$arg" in *://*|github.com/*|git@github.com:*) GH_POSITIONAL_URL=1 ;; esac
+        if [ -z "$top" ]; then top=$arg; elif [ -z "$sub" ]; then sub=$arg; fi
+        continue
+        ;;
+    esac
+    tail=$arg
+    while [ -n "$tail" ]; do
+      value='' attached=0
+      case "$tail" in
+        --*)
+          option=${tail%%=*}
+          case "$tail" in *=*) value=${tail#*=}; attached=1 ;; esac
+          tail=''
+          ;;
+        *)
+          tail=${tail#-}
+          option=-${tail%"${tail#?}"}
+          tail=${tail#?}
+          ;;
+      esac
+      gh_option_kind "$top" "$sub" "$option"
+      kind=$GH_OPTION_KIND
+      case "$kind" in
+        method|field|input|value|repo)
+          if [ -n "$tail" ]; then value=${tail#=}; attached=1; tail=''; fi
+          if [ "$attached" -eq 0 ]; then
+            if [ "$#" -eq 0 ]; then GH_OPTIONS_KNOWN=0; GH_ARGS+=("$option"); break; fi
+            value=$1
+            shift
+          fi
+          GH_ARGS+=("$option" "$value")
+          if [ "$kind" = repo ]; then GH_HAS_REPO_OPTION=1; GH_DESTINATION_ARGS+=("$option" "$value"); fi
+          ;;
+        boolean|help)
+          case "$tail" in =*) value=${tail#=}; attached=1; tail='' ;; esac
+          if [ "$attached" -eq 1 ]; then
+            GH_ARGS+=("$option=$value")
+            case "$value" in true|false) ;; *) GH_OPTIONS_KNOWN=0 ;; esac
+          else
+            GH_ARGS+=("$option")
+          fi
+          if [ "$kind" = help ] && { [ "$attached" -eq 0 ] || [ "$value" = true ]; }; then GH_HELP=1; fi
+          ;;
+        *)
+          GH_OPTIONS_KNOWN=0
+          GH_ARGS+=("$arg")
+          tail=''
+          ;;
+      esac
+    done
+  done
+}
+
+parse_top_sub_and_target() {
+  local tool=$1 arg expect_repo=0 seen_top=0 seen_sub=0 previous=
+  shift
+  TOP='' SUB='' TARGET='' TRANSFER_DEST='' API_METHOD='' TARGET_UNPROVED=0
+  for arg in "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}"; do
+    if [ "$expect_repo" -eq 1 ]; then
+      set_target "$arg" explicit-repository
+      expect_repo=0
+      previous=$arg
+      continue
+    fi
+    case "$arg" in
+      -R|--repo) expect_repo=1; previous=$arg; continue ;;
+    esac
+    if [ "$seen_top" -eq 0 ]; then
+      case "$arg" in -*) previous=$arg; continue ;; esac
+      TOP=$arg
+      seen_top=1
+      previous=$arg
+      continue
+    fi
+    if [ "$seen_sub" -eq 0 ]; then
+      case "$arg" in -*) previous=$arg; continue ;; esac
+      if [ "$TOP" = api ] && [ "$tool" = gh-axi ] && [ -z "$API_METHOD" ]; then
+        case "$arg" in
+          GET|POST|PUT|PATCH|DELETE|HEAD) API_METHOD=$arg; continue ;;
+        esac
+      fi
+      SUB=$arg
+      seen_sub=1
+    fi
+    previous=$arg
+  done
+  [ "$expect_repo" -eq 0 ] || TARGET=AMBIGUOUS
+
+  if [ "$TOP" = api ]; then
+    case "$(lower "$SUB")" in
+      /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) set_target "$SUB" api-path ;;
+    esac
+  fi
+
+  if [ "$TOP" = repo ]; then
+    case "$SUB" in
+      view|fork|edit|archive|unarchive|delete|rename|sync|create) repo_destination "$SUB" "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}" ;;
+    esac
+  fi
+
+  if [ "$TOP" = issue ] && [ "$SUB" = transfer ]; then
+    TRANSFER_DEST=$(issue_transfer_destination "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}") || TRANSFER_DEST=''
+  fi
+  : "$tool" "$previous"
+}
+
+classify_gh() {
+  local tool=$1 arg subsub method=GET method_explicit=0 has_fields=0 query='' query_seen=0 org_repo_create=0 api_endpoint api_host api_path
+  local expect_api_value='' field='' has_input=0
+  shift
+  MUTATION=0
+  REPO_SCOPED=0
+  ARGUMENT_ERROR=''
+  normalize_gh_arguments "$@"
+  set -- "${GH_ARGS[@]+"${GH_ARGS[@]}"}"
+  parse_top_sub_and_target "$tool" "$@"
+  if [ -n "$API_METHOD" ]; then method=$API_METHOD; method_explicit=1; fi
+  if [ "$TOP" = api ] && { [ "$GH_OPTIONS_KNOWN" -eq 0 ] || [ "$GH_HAS_REPO_OPTION" -eq 1 ]; }; then
+    ARGUMENT_ERROR='unsupported or incomplete gh api options; API commands do not support -R/--repo'
+    return 0
+  fi
+  if [ "$GH_OPTIONS_KNOWN" -eq 1 ] && [ "$GH_HELP" -eq 1 ]; then return 0; fi
+  [ -n "$TOP" ] || return 0
+
+  case "$TOP" in
+    pr)
+      REPO_SCOPED=1
+      case "$SUB" in list|view|status|checks|diff|checkout) ;; *) MUTATION=1 ;; esac
+      ;;
+    issue)
+      REPO_SCOPED=1
+      case "$SUB" in list|view|status) ;; subissue) [ "${3:-}" = list ] || MUTATION=1 ;; *) MUTATION=1 ;; esac
+      ;;
+    agent-task|agent|agent-tasks|agents)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
+      ;;
+    discussion)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
+      ;;
+    run)
+      REPO_SCOPED=1
+      case "$SUB" in list|view|watch|download) ;; *) MUTATION=1 ;; esac
+      ;;
+    workflow)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
+      ;;
+    release)
+      REPO_SCOPED=1
+      case "$SUB" in list|view|download) ;; *) MUTATION=1 ;; esac
+      ;;
+    label)
+      REPO_SCOPED=1
+      [ "$SUB" = list ] || MUTATION=1
+      ;;
+    ruleset)
+      REPO_SCOPED=1
+      case "$SUB" in list|view) ;; *) MUTATION=1 ;; esac
+      ;;
+    secret|variable)
+      REPO_SCOPED=1
+      [ "$SUB" = list ] || MUTATION=1
+      ;;
+    api)
+      [ -n "$TARGET" ] && REPO_SCOPED=1
+      api_endpoint=$(lower "$SUB")
+      case "$api_endpoint" in
+        http://*|https://*)
+          api_host=${api_endpoint#*://}
+          api_path=/${api_host#*/}
+          api_host=${api_host%%/*}
+          api_host=${api_host##*@}
+          api_host=${api_host%%:*}
+          [ "$api_host" != api.github.com ] || api_endpoint=$api_path
+          ;;
+      esac
+      api_endpoint=${api_endpoint%%\?*}
+      api_endpoint=${api_endpoint%%\#*}
+      case "$api_endpoint" in graphql|/graphql) SUB=graphql ;; esac
+      case "$api_endpoint" in
+        /repos/*|repos/*|https://api.github.com/repos/*|http://api.github.com/repos/*) REPO_SCOPED=1 ;;
+        orgs/"$PROTECTED_OWNER"/repos|orgs/"$PROTECTED_OWNER"/repos/|/orgs/"$PROTECTED_OWNER"/repos|/orgs/"$PROTECTED_OWNER"/repos/|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos|https://api.github.com/orgs/"$PROTECTED_OWNER"/repos/|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos|http://api.github.com/orgs/"$PROTECTED_OWNER"/repos/) org_repo_create=1 ;;
+      esac
+      for arg in "$@"; do
+        field=''
+        if [ -n "$expect_api_value" ]; then
+          case "$expect_api_value" in
+            method) method=$arg ;;
+            field) field=$arg ;;
+          esac
+          expect_api_value=''
+        else
+          [ "$arg" != -- ] || break
+          gh_option_kind "$TOP" "$SUB" "$arg"
+          case "$GH_OPTION_KIND" in
+            method) expect_api_value=method; method_explicit=1 ;;
+            field) has_fields=1; expect_api_value=field ;;
+            input) has_fields=1; has_input=1; expect_api_value=other ;;
+            value|repo) expect_api_value=other ;;
+          esac
+        fi
+        case "$field" in
+          query=*) query=${field#query=}; case "$query" in @*) query_seen=0 ;; *) query_seen=1 ;; esac ;;
+        esac
+      done
+      if [ "$method_explicit" -eq 0 ] && [ "$has_fields" -eq 1 ]; then method=POST; fi
+      if [ "$expect_api_value" = method ]; then method=EXPECT; fi
+      method=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
+      if [ "$SUB" = graphql ]; then
+        if [ "$query_seen" -eq 1 ] && [ "$has_input" -eq 0 ]; then
+          case "$query" in *mutation*) MUTATION=1 ;; *) MUTATION=0 ;; esac
+        else
+          MUTATION=1
+        fi
+      else
+        case "$method" in GET|HEAD) ;; *) MUTATION=1 ;; esac
+      fi
+      if [ "$org_repo_create" -eq 1 ] && [ "$MUTATION" -eq 1 ]; then
+        TARGET=$PROTECTED_OWNER/repos
+        REPO_SCOPED=1
+      fi
+      ;;
+    repo)
+      case "$SUB" in
+        list|view|clone|read-dir|read-file|gitignore|license|set-default|'') ;;
+        deploy-key)
+          subsub=$(repo_subsubcommand "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}") || subsub=''
+          case "$subsub" in list) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+          ;;
+        autolink)
+          subsub=$(repo_subsubcommand "${GH_DESTINATION_ARGS[@]+"${GH_DESTINATION_ARGS[@]}"}") || subsub=''
+          case "$subsub" in list|view) ;; *) MUTATION=1; REPO_SCOPED=1 ;; esac
+          ;;
+        fork)
+          if fork_org "$@"; then
+            MUTATION=1
+            REPO_SCOPED=1
+            TARGET=$PROTECTED_OWNER/fork
+          fi
+          ;;
+        create) MUTATION=1; REPO_SCOPED=1 ;;
+        *) MUTATION=1; REPO_SCOPED=1 ;;
+      esac
+      ;;
+    stack)
+      case "$SUB" in submit|merge) MUTATION=1; REPO_SCOPED=1 ;; link)
+        for arg in "$@"; do [ "$arg" = --open ] && { MUTATION=1; REPO_SCOPED=1; }; done
+        ;;
+      esac
+      ;;
+    cache)
+      REPO_SCOPED=1
+      [ "$SUB" = delete ] && MUTATION=1
+      ;;
+    search|status|browse|attestation|help|completion|auth|config|alias|extension|ssh-key|gpg-key|org|gist|project|codespace|setup)
+      ;;
+    *)
+      # Unknown official/extension commands are not assumed to mutate a repo.
+      # An explicit protected selector is still refused below if they do.
+      ;;
+  esac
+  if [ "$MUTATION" -eq 1 ]; then
+    if [ "$TOP" = api ] && [ "$SUB" = graphql ]; then
+      ARGUMENT_ERROR='GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally'
+    elif { [ "$TOP" = pr ] || [ "$TOP" = issue ]; } && [ "$GH_POSITIONAL_URL" -eq 1 ]; then
+      ARGUMENT_ERROR='positional PR/issue URLs are unsupported for mutations; use an ordinary identifier and -R/--repo'
+    elif [ "$GH_OPTIONS_KNOWN" -eq 0 ] || [ "$TARGET_UNPROVED" -eq 1 ]; then
+      ARGUMENT_ERROR='repository mutation has unsupported options or an unproved destination; use supported options and an explicit repository'
+    fi
+  fi
+}
+
+refuse_reason() {
+  printf 'upstream-write-guard: %s\n' "$1" >&2
+}
+
+check_gh() {
+  local tool=$1
+  shift
+  classify_gh "$tool" "$@"
+  if [ -n "$ARGUMENT_ERROR" ]; then refuse_reason "$ARGUMENT_ERROR"; return 2; fi
+  if [ "$TARGET" = AMBIGUOUS ]; then
+    refuse_reason "conflicting or incomplete repository selectors; refusing before any GitHub operation"
+    return 2
+  fi
+  if [ "$MUTATION" -eq 1 ] && [ "$REPO_SCOPED" -eq 1 ] && [ -z "$TARGET" ]; then
+    refuse_reason "repository mutation '$tool $TOP $SUB' must name its exact repository with -R/--repo (fork-aware defaults are forbidden)"
+    return 2
+  fi
+  if [ "$MUTATION" -eq 1 ] && [ -n "$TARGET" ] && repo_is_protected "$TARGET"; then
+    refuse_reason "repository mutation against protected upstream '$TARGET' requires the exact captain-authorized interface"
+    return 2
+  fi
+  if [ "$MUTATION" -eq 1 ] && [ -n "$TRANSFER_DEST" ] && repo_is_protected "$TRANSFER_DEST"; then
+    refuse_reason "repository mutation against protected upstream '$TRANSFER_DEST' requires the exact captain-authorized interface"
+    return 2
+  fi
+  return 0
+}
+
+GIT_REMOTE='' GIT_TARGET=''
+parse_git_push() {
+  local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 fail_closed=0 candidates rule prefix rules rule_status
+  local -a global_args=()
+  GIT_REMOTE=
+  GIT_TARGET=
+  for arg in "$@"; do
+    if [ "$expect_c" -eq 1 ]; then global_args+=( -C "$arg" ); expect_c=0; continue; fi
+    if [ "$expect_c_override" -eq 1 ]; then
+      global_args+=( -c "$arg" )
+      expect_c_override=0
+      continue
+    fi
+    if [ "$after_push" -eq 0 ]; then
+      case "$arg" in
+        -C) expect_c=1 ;;
+        -C?*) global_args+=( -C "${arg#-C}" ) ;;
+        -c) expect_c_override=1 ;;
+        --help|-h) [ "$fail_closed" -eq 0 ] || return 3; return 1 ;;
+        push) after_push=1 ;;
+        -*) fail_closed=1 ;;
+        *) [ "$fail_closed" -eq 0 ] && return 1 ;;
+      esac
+      continue
+    fi
+    if [ "$expect_repo" -eq 1 ]; then
+      [ -z "$GIT_REMOTE" ] && [ -n "$arg" ] || fail_closed=1
+      GIT_REMOTE=$arg
+      expect_repo=0
+      continue
+    fi
+    case "$arg" in
+      --repo=*)
+        [ -z "$GIT_REMOTE" ] && [ -n "${arg#--repo=}" ] || fail_closed=1
+        GIT_REMOTE=${arg#--repo=}
+        ;;
+      --repo) expect_repo=1 ;;
+      --help|-h) [ "$fail_closed" -eq 0 ] || return 3; return 1 ;;
+      --force|--force-with-lease|--force-with-lease=*|--dry-run|--tags|--all|--delete|-d|--porcelain|-u|--set-upstream|--no-verify|-f) ;;
+      -*) fail_closed=1 ;;
+      *) [ -n "$GIT_REMOTE" ] || GIT_REMOTE=$arg ;;
+    esac
+  done
+  [ "$after_push" -eq 1 ] || return 1
+  [ "$expect_c" -eq 0 ] && [ "$expect_c_override" -eq 0 ] && [ "$expect_repo" -eq 0 ] || return 3
+  [ "$fail_closed" -eq 0 ] || return 3
+  [ -n "$GIT_REMOTE" ] || return 2
+  case "$GIT_REMOTE" in
+    *://*|git@github.com:*|git@ssh.github.com:*|github.com/*|ssh.github.com/*|/*)
+      rules=$(git "${global_args[@]+"${global_args[@]}"}" config --get-regexp '^url\..*\.(pushInsteadOf|insteadOf)$' 2>/dev/null)
+      rule_status=$?
+      [ "$rule_status" -le 1 ] || return 3
+      while IFS= read -r rule; do
+        [ -n "$rule" ] || continue
+        prefix=${rule#* }
+        case "$GIT_REMOTE" in "$prefix"*) return 3 ;; esac
+      done <<< "$rules"
+      candidates=$GIT_REMOTE
+      ;;
+    *)
+      candidates=$(git "${global_args[@]+"${global_args[@]}"}" remote get-url --all --push "$GIT_REMOTE" 2>/dev/null) || return 2
+      ;;
+  esac
+  [ -n "$candidates" ] || return 2
+  case "$candidates" in
+    *$'\n'*) return 3 ;;
+    *'$'*|*'`'*|*'*'*|*'?'*|*'['*|*']'*|*'{'*|*'}'*) return 2 ;;
+  esac
+  case "$candidates" in
+    /*) GIT_TARGET=local:$candidates ;;
+    *) GIT_TARGET=$(normalize_repo "$candidates" 2>/dev/null) || return 2 ;;
+  esac
+  [ -n "$GIT_TARGET" ] || return 2
+  return 0
+}
+
+check_git() {
+  parse_git_push "$@"
+  case $? in
+    1) return 0 ;;
+    2) refuse_reason "cannot resolve git push destination '$GIT_REMOTE' locally; refusing before network access"; return 2 ;;
+    3) refuse_reason "git push destination is overridden or redirected in a way that cannot be verified locally; refusing before network access"; return 2 ;;
+  esac
+  if [ -n "$GIT_TARGET" ] && repo_is_protected "$GIT_TARGET"; then
+    refuse_reason "git push to protected upstream '$GIT_TARGET' requires the exact captain-authorized interface"
+    return 2
+  fi
+  return 0
+}
+
+locate_real_tool() {
+  local tool=$1 skip=${2:-} dir candidate
+  OLD_IFS=$IFS
+  IFS=:
+  for dir in $PATH; do
+    [ -n "$dir" ] || dir=.
+    [ "$dir" = "$skip" ] && continue
+    candidate=$dir/$tool
+    [ -x "$candidate" ] || continue
+    case "$candidate" in "$SCRIPT_DIR/$tool"|"$skip/$tool") continue ;; esac
+    printf '%s\n' "$candidate"
+    IFS=$OLD_IFS
+    return 0
+  done
+  IFS=$OLD_IFS
+  return 1
+}
+
+install_shims() {
+  local dir=$1 tool quoted_guard quoted_dir tmp
+  chmod u+w "$dir" 2>/dev/null || true
+  rm -rf "$dir"
+  mkdir -p "$dir" || return 1
+  quoted_guard=$(printf '%q' "$SCRIPT_DIR/fm-upstream-write-guard.sh")
+  quoted_dir=$(printf '%q' "$(CDPATH='' cd -- "$dir" && pwd -P)")
+  for tool in gh gh-axi; do
+    tmp=$dir/$tool
+    cat >"$tmp" <<EOF
+#!/usr/bin/env bash
+exec $quoted_guard cli $quoted_dir $tool "\$@"
+EOF
+    chmod 500 "$tmp"
+  done
+  chmod 500 "$dir"
+}
+
+audit_authorization() {
+  local repo=$1 words=$2 tool=$3
+  shift 3
+  local home dir stamp nonce record cmd_q arg words_hash
+  home=${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}
+  dir=$home/state/upstream-write-authorizations
+  mkdir -p "$dir" || die "cannot create upstream authorization audit directory: $dir"
+  chmod 700 "$dir" 2>/dev/null || true
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  nonce="$$.$(date +%s)"
+  record=$dir/$stamp-$nonce.record
+  cmd_q=$tool
+  for arg in "$@"; do printf -v cmd_q '%s %q' "$cmd_q" "$arg"; done
+  if command -v shasum >/dev/null 2>&1; then
+    words_hash=$(shasum -a 256 "$words" | awk '{print $1}')
+  else
+    words_hash=$(sha256sum "$words" | awk '{print $1}')
+  fi
+  umask 077
+  {
+    printf 'version=1\ncreated=%s\nrepo=%s\ncommand=%s\ncaptain_words_sha256=%s\n' "$stamp" "$repo" "$cmd_q" "$words_hash" &&
+    printf '%s\n' 'captain_words<<EOF' &&
+    cat "$words" &&
+    printf '\nEOF\nresult=pending\n'
+  } >"$record" || die "cannot write authorization audit record"
+  printf '%s\n' "$record"
+}
+
+authorize() {
+  local repo='' words='' tool actual record status normalized
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --repo) [ "$#" -gt 1 ] || usage; repo=$2; shift 2 ;;
+      --repo=*) repo=${1#--repo=}; shift ;;
+      --captain-words-file) [ "$#" -gt 1 ] || usage; words=$2; shift 2 ;;
+      --captain-words-file=*) words=${1#--captain-words-file=}; shift ;;
+      --) shift; break ;;
+      *) usage ;;
+    esac
+  done
+  [ -z "${FM_TASK_ID:-}" ] || die "workers cannot authorize protected-upstream writes; route the exact captain instruction through firstmate"
+  normalized=$(normalize_repo "$repo" 2>/dev/null) || die "--repo must name one exact GitHub owner/repository"
+  repo_is_protected "$normalized" || die "the authorization interface is only for protected kunchenguid/* repositories"
+  [ -n "$words" ] && [ -f "$words" ] && [ ! -L "$words" ] && [ -s "$words" ] || die "--captain-words-file must be a nonempty regular file"
+  [ "$#" -gt 0 ] || usage
+  tool=${1##*/}
+  shift
+  case "$tool" in
+    gh|gh-axi)
+      classify_gh "$tool" "$@"
+      [ -z "$ARGUMENT_ERROR" ] || die "$ARGUMENT_ERROR"
+      [ "$MUTATION" -eq 1 ] || die "authorized command is not a repository mutation"
+      [ "$TARGET" = "$normalized" ] || die "authorized command must explicitly name exact repository '$normalized'"
+      if [ -n "$TRANSFER_DEST" ] && repo_is_protected "$TRANSFER_DEST"; then
+        [ "$(normalize_repo "$TRANSFER_DEST" 2>/dev/null)" = "$normalized" ] || die "authorized command's issue-transfer destination '${TRANSFER_DEST}' is outside the named --repo scope"
+      fi
+      ;;
+    git)
+      parse_git_push "$@" || die "authorized git command must be a push with a locally resolvable destination"
+      [ "$GIT_TARGET" = "$normalized" ] || die "authorized git push resolves to '${GIT_TARGET:-unknown}', not '$normalized'"
+      ;;
+    *) die "authorized tool must be gh, gh-axi, or git" ;;
+  esac
+  record=$(audit_authorization "$normalized" "$words" "$tool" "$@") || return $?
+  actual=$(locate_real_tool "$tool" "" 2>/dev/null) || die "cannot find the real $tool executable"
+  "$actual" "$@"
+  status=$?
+  printf 'result=exit-%s\n' "$status" >>"$record" 2>/dev/null || true
+  return "$status"
+}
+
+cmd=${1:-}
+case "$cmd" in
+  install-shims)
+    [ "$#" -eq 2 ] || usage
+    install_shims "$2"
+    ;;
+  cli)
+    [ "$#" -ge 3 ] || usage
+    shim=$2 tool=$3
+    shift 3
+    case "$tool" in gh|gh-axi) ;; *) usage ;; esac
+    check_gh "$tool" "$@" || exit $?
+    remaining_path='' path_separator=''
+    IFS=: read -r -a path_dirs <<< "$PATH"
+    for dir in "${path_dirs[@]}"; do
+      [ "$dir" = "$shim" ] && continue
+      remaining_path=$remaining_path$path_separator$dir
+      path_separator=:
+    done
+    export PATH=$remaining_path
+    actual=$(locate_real_tool "$tool" "$shim" 2>/dev/null) || die "cannot find the real $tool executable after the guard shim"
+    exec "$actual" "$@"
+    ;;
+  pre-push)
+    [ "$#" -eq 3 ] || usage
+    target=$(normalize_repo "$3" 2>/dev/null || true)
+    if [ -n "$target" ] && repo_is_protected "$target"; then
+      refuse_reason "git push to protected upstream '$target' is blocked before ref updates; only firstmate's exact captain-authorized interface may perform it"
+      exit 2
+    fi
+    ;;
+  check)
+    [ "$#" -ge 2 ] || usage
+    tool=${2##*/}
+    shift 2
+    case "$tool" in
+      gh|gh-axi) check_gh "$tool" "$@" ;;
+      git) check_git "$@" ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  authorize)
+    shift
+    authorize "$@"
+    ;;
+  -h|--help) usage ;;
+  *) usage ;;
+esac

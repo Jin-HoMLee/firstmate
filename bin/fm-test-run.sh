@@ -402,7 +402,7 @@ family_for_basename() {
     fm-send-inbox.test.sh|fm-spawn-batch.test.sh|\
     fm-spawn-dispatch-profile.test.sh|fm-claude-trust.test.sh|\
     fm-worker-account.test.sh|\
-    fm-git-strip-ai-trailers.test.sh|\
+    fm-git-strip-ai-trailers.test.sh|fm-upstream-write-guard.test.sh|\
     fm-trace-context-spawn.test.sh|fm-spawn-worktree-settle.test.sh|\
     fm-spawn-compact-adviser-disable.test.sh|\
     fm-spawn-compact-adviser-disable-remote.test.sh|\
@@ -946,6 +946,7 @@ tests/fm-task-inbox.test.sh 31965
 tests/fm-tasks-axi.test.sh 2293
 tests/fm-teardown-endpoint-safety.test.sh 40851
 tests/fm-teardown.test.sh 202132
+tests/fm-telegram.test.sh 19180
 tests/fm-test-fixture-cleanup.test.sh 866
 tests/fm-test-fixtures.test.sh 1802
 tests/fm-test-isolation-proof.test.sh 2866
@@ -959,6 +960,7 @@ tests/fm-trace-context-spawn.test.sh 57488
 tests/fm-turnend-foreign-owner-arm-fix.test.sh 5575
 tests/fm-turnend-guard.test.sh 34727
 tests/fm-update.test.sh 11894
+tests/fm-upstream-write-guard.test.sh 20822
 tests/fm-vendor-auth-probe.test.sh 43278
 tests/fm-voice-relay.test.sh 28917
 tests/fm-wake-daemon-lifecycle-e2e.test.sh 7345
@@ -1690,6 +1692,12 @@ families_for_changed_path() {
       # bin/fm-dispatch-resolve.sh (TYPESAFE_API_KEY).
       printf '%s\n' pr-forge
       printf '%s\n' "__script__:fm-dispatch-resolve.test.sh"
+      ;;
+    bin/fm-upstream-write-guard.sh|bin/fm-upstream-write-pretool-check.sh|\
+    bin/fm-upstream-write-command-policy.mjs|.agents/skills/upstream-write-guard/SKILL.md|\
+    .grok/hooks/fm-primary-upstream-write-check.json|\
+    .opencode/plugins/fm-primary-upstream-write-check.js)
+      printf '%s\n' __script__:fm-upstream-write-guard.test.sh
       ;;
     .pi/extensions/fm-primary-read-repetition.ts|.pi/extensions/lib/fm-primary-read-repetition-policy.ts|tests/fixtures/fm-read-repetition-sdk.mjs|tests/fixtures/fm-read-repetition-live.mjs)
       printf '%s\n' __script__:fm-read-repetition.test.sh

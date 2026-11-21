@@ -477,11 +477,15 @@ function wordsInNode(tokens) {
 
 const WRAPPER_OPTIONS = {
   command: { noArgument: new Set(["p", "v", "V"]), takesArgument: new Set() },
-  env: { noArgument: new Set(["0", "i", "P", "v"]), takesArgument: new Set(["a", "C", "S", "u"]) },
+  env: { noArgument: new Set(["0", "i", "v"]), takesArgument: new Set(["a", "C", "P", "S", "u"]) },
   exec: { noArgument: new Set(["c", "l"]), takesArgument: new Set(["a"]) },
   nohup: { noArgument: new Set(), takesArgument: new Set() },
   sudo: { noArgument: new Set(["A", "B", "b", "E", "e", "H", "i", "K", "k", "l", "N", "n", "P", "S", "s", "v", "V"]), takesArgument: new Set(["C", "D", "g", "h", "p", "r", "R", "t", "T", "u", "U"]) },
   timeout: { noArgument: new Set(["f", "p", "v"]), takesArgument: new Set(["k", "s"]) },
+  nice: { noArgument: new Set(), takesArgument: new Set(["n"]) },
+  stdbuf: { noArgument: new Set(), takesArgument: new Set(["i", "o", "e"]) },
+  setsid: { noArgument: new Set(["c", "f", "w"]), takesArgument: new Set() },
+  watch: { noArgument: new Set(["d", "b", "e", "g", "t", "x", "c", "p", "q", "w", "h", "v"]), takesArgument: new Set(["n"]) },
 };
 
 const WRAPPER_LONG_OPTIONS = {
@@ -491,6 +495,10 @@ const WRAPPER_LONG_OPTIONS = {
   nohup: { noArgument: new Set(["help", "version"]), takesArgument: new Set() },
   sudo: { noArgument: new Set(["askpass", "background", "bell", "edit", "help", "login", "non-interactive", "preserve-env", "preserve-groups", "remove-timestamp", "reset-timestamp", "set-home", "shell", "stdin", "validate", "version"]), takesArgument: new Set(["chdir", "chroot", "close-from", "command-timeout", "group", "host", "other-user", "prompt", "role", "type", "user"]) },
   timeout: { noArgument: new Set(["foreground", "preserve-status", "verbose", "help", "version"]), takesArgument: new Set(["kill-after", "signal"]) },
+  nice: { noArgument: new Set(["help", "version"]), takesArgument: new Set(["adjustment"]) },
+  stdbuf: { noArgument: new Set(["help", "version"]), takesArgument: new Set(["input", "output", "error"]) },
+  setsid: { noArgument: new Set(["ctty", "fork", "wait", "help", "version"]), takesArgument: new Set() },
+  watch: { noArgument: new Set(["differences", "beep", "errexit", "chgexit", "no-title", "exec", "color", "precise", "quiet", "no-wrap", "help", "version"]), takesArgument: new Set(["interval"]) },
 };
 
 function consumeWrapperOptions(name, words, index) {
@@ -498,25 +506,30 @@ function consumeWrapperOptions(name, words, index) {
   const short = WRAPPER_OPTIONS[optionOwner];
   const long = WRAPPER_LONG_OPTIONS[optionOwner];
   const embeddedPayloads = [];
+  let directoryChange = false;
+  let environmentChange = false;
   let next = index;
   while (words[next]) {
     const value = words[next].value;
-    if (value === "--") return { index: next + 1, unresolved: false, embeddedPayloads };
-    if (!value.startsWith("-") || value === "-") return { index: next, unresolved: false, embeddedPayloads };
+    if (value === "--") return { index: next + 1, unresolved: false, embeddedPayloads, directoryChange, environmentChange };
+    if (!value.startsWith("-") || value === "-") return { index: next, unresolved: false, embeddedPayloads, directoryChange, environmentChange };
     if (value.startsWith("--")) {
       const equals = value.indexOf("=");
       const option = value.slice(2, equals === -1 ? undefined : equals);
       if (long.noArgument.has(option)) {
+        if (name === "env" && option === "ignore-environment") environmentChange = true;
         next += 1;
         continue;
       }
-      if (!long.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads };
+      if (!long.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
+      if (name === "env" && option === "chdir") directoryChange = true;
+      else if (name === "env") environmentChange = true;
       if (equals !== -1) {
         if (name === "env" && option === "split-string") embeddedPayloads.push(value.slice(equals + 1));
         next += 1;
         continue;
       }
-      if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads };
+      if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
       if (name === "env" && option === "split-string") embeddedPayloads.push(words[next + 1].value);
       next += 2;
       continue;
@@ -524,10 +537,15 @@ function consumeWrapperOptions(name, words, index) {
     let consumedArgument = false;
     for (let offset = 1; offset < value.length; offset += 1) {
       const option = value[offset];
-      if (short.noArgument.has(option)) continue;
-      if (!short.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads };
+      if (short.noArgument.has(option)) {
+        if (name === "env" && option === "i") environmentChange = true;
+        continue;
+      }
+      if (!short.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
+      if (name === "env" && option === "C") directoryChange = true;
+      else if (name === "env") environmentChange = true;
       if (offset + 1 === value.length) {
-        if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads };
+        if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
         if (name === "env" && option === "S") embeddedPayloads.push(words[next + 1].value);
         next += 2;
       } else {
@@ -539,7 +557,7 @@ function consumeWrapperOptions(name, words, index) {
     }
     if (!consumedArgument) next += 1;
   }
-  return { index: next, unresolved: false, embeddedPayloads };
+  return { index: next, unresolved: false, embeddedPayloads, directoryChange, environmentChange };
 }
 
 export function commandPosition(tokens) {
@@ -548,23 +566,30 @@ export function commandPosition(tokens) {
   while (index < words.length && isAssignment(words[index].value)) index += 1;
   const prefixAssignments = index;
   const wrappers = [];
+  let wrapperDirectoryChange = false;
+  let wrapperEnvironmentChange = false;
   let unresolvedWrapperOption = false;
   const wrapperPayloads = [];
   let command = words[index];
   while (command) {
     const name = basename(command.value);
-    if (name === "exec" || name === "command" || name === "sudo" || name === "nohup") {
+    if (name === "exec" || name === "command" || name === "sudo" || name === "nohup" || name === "nice" || name === "stdbuf" || name === "setsid" || name === "watch") {
       wrappers.push(name);
       const options = consumeWrapperOptions(name, words, index + 1);
       unresolvedWrapperOption ||= options.unresolved;
       wrapperPayloads.push(...options.embeddedPayloads);
-      index = options.index;
+      index = options.unresolved ? options.index + 1 : options.index;
+      if (name === "sudo") {
+        while (words[index] && isAssignment(words[index].value)) index += 1;
+      }
       command = words[index];
       continue;
     }
     if (name === "env") {
       wrappers.push(name);
       const options = consumeWrapperOptions(name, words, index + 1);
+      wrapperDirectoryChange ||= options.directoryChange;
+      wrapperEnvironmentChange ||= options.environmentChange;
       unresolvedWrapperOption ||= options.unresolved;
       wrapperPayloads.push(...options.embeddedPayloads);
       index = options.index;
@@ -590,9 +615,15 @@ export function commandPosition(tokens) {
       }
       continue;
     }
+    if (command.value === "builtin") {
+      wrappers.push(command.value);
+      index += 1;
+      command = words[index];
+      continue;
+    }
     break;
   }
-  return { words, index, command, wrappers, prefixAssignments, unresolvedWrapperOption, wrapperPayloads };
+  return { words, index, command, wrappers, prefixAssignments, unresolvedWrapperOption, wrapperPayloads, wrapperDirectoryChange, wrapperEnvironmentChange };
 }
 
 const PROTECTED_SCRIPTS = [
@@ -614,7 +645,7 @@ function hasUnclassifiableProtectedExpansion(word, root) {
   return /(?:^|\/)fm-watch/.test(word.value);
 }
 
-function shellInvocation(position) {
+export function shellInvocation(position) {
   if (!position.command) return null;
   const name = basename(position.command.value);
   if (!["sh", "bash", "zsh"].includes(name)) return null;
@@ -649,20 +680,20 @@ function shellInvocation(position) {
   return { kind: "stdin", payload: null };
 }
 
-function shellHeredocPayloads(tokens, position) {
+export function shellHeredocPayloads(tokens, position) {
   if (shellInvocation(position)?.kind !== "stdin") return [];
   const heredocs = tokens.filter((token) => token.type === "redir" && token.fd === 0 && typeof token.heredoc === "string");
   return heredocs.length === 0 ? [] : [heredocs.at(-1).heredoc];
 }
 
-function shellHereStringPayloads(tokens, position) {
+export function shellHereStringPayloads(tokens, position) {
   if (shellInvocation(position)?.kind !== "stdin") return [];
   const payloads = [];
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.type !== "redir" || token.value !== "<<<" || token.fd !== 0) continue;
     const payload = tokens[i + 1];
-    if (payload?.type === "word" && payload.literal && payload.subs.length === 0) payloads.push(payload.value);
+    if (payload?.type === "word") payloads.push(payload.value);
   }
   return payloads;
 }
@@ -672,11 +703,40 @@ function sourcedScript(position) {
   return position.words[position.index + 1] || null;
 }
 
-function evalPayload(position) {
+export function evalPayload(position) {
   if (!position.command || basename(position.command.value) !== "eval") return null;
   const payloads = position.words.slice(position.index + 1);
-  if (payloads.length === 0 || payloads.some((payload) => !payload.literal || payload.subs.length > 0)) return null;
+  if (payloads.length === 0) return null;
   return payloads.map((payload) => payload.value).join(" ");
+}
+
+const SHELL_RESERVED_WORDS = new Set([
+  "if", "then", "else", "elif", "fi", "for", "while", "until", "case",
+  "esac", "do", "done", "function", "time", "coproc", "!",
+]);
+
+function shiftPastReservedWords(position) {
+  let index = position.index;
+  while (index < position.words.length) {
+    const name = basename(position.words[index].value);
+    if (SHELL_RESERVED_WORDS.has(name) || /^-[^-]/.test(position.words[index].value)) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  const unwrapped = commandPosition(position.words.slice(index));
+  return {
+    words: position.words,
+    index: index + unwrapped.index,
+    command: unwrapped.command,
+    wrappers: [...position.wrappers, ...unwrapped.wrappers],
+    prefixAssignments: position.prefixAssignments + unwrapped.prefixAssignments,
+    unresolvedWrapperOption: position.unresolvedWrapperOption || unwrapped.unresolvedWrapperOption,
+    wrapperPayloads: [...position.wrapperPayloads, ...unwrapped.wrapperPayloads],
+    wrapperDirectoryChange: position.wrapperDirectoryChange || unwrapped.wrapperDirectoryChange,
+    wrapperEnvironmentChange: position.wrapperEnvironmentChange || unwrapped.wrapperEnvironmentChange,
+  };
 }
 
 function wordReferencesAny(word, names) {
@@ -739,16 +799,18 @@ function isWatcherPgrep(position, context) {
   return position.words.slice(position.index + 1).some((word) => /(?:^|\/)fm-watch(?:\.sh)?\b/.test(word.value) || wordReferencesAny(word, context.watcherPatterns));
 }
 
-function analyzeProgram(command, context, depth = 0) {
-  if (depth > 12) {
-    return { error: "recursion limit", protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
+export function analyzeProgram(command, context, depth = 0, depthLimit = 12) {
+  if (depth > depthLimit) {
+    return { error: "recursion limit", traversalError: "recursion limit", positions: [], protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
   }
   const lexed = new Lexer(command).tokenize();
   if (lexed.error) {
-    return { error: lexed.error, protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
+    return { error: lexed.error, traversalError: lexed.error, positions: [], protectedFound: rawMentionsProtected(command), broadKill: rawMentionsBroadKill(command), pgrepWatcher: false, watcherPids: new Set() };
   }
   const program = splitProgram(lexed.tokens);
   const nodeInfos = [];
+  const positions = [];
+  let traversalError = "";
   let nestedProtected = false;
   let broadKill = false;
   let pgrepWatcher = false;
@@ -762,10 +824,14 @@ function analyzeProgram(command, context, depth = 0) {
   let unclassifiableProtected = false;
 
   for (const tokens of program.nodes) {
-    const position = commandPosition(tokens);
+    const rawPosition = commandPosition(tokens);
+    const position = rawPosition.command && SHELL_RESERVED_WORDS.has(basename(rawPosition.command.value))
+      ? shiftPastReservedWords(rawPosition)
+      : rawPosition;
+    positions.push({ tokens, position });
     const nodeContext = contextWithAssignments(activeContext, position.words);
     const firstName = basename(position.words[0]?.value || "");
-    if (["if", "then", "else", "elif", "fi", "for", "while", "until", "case", "esac", "do", "done", "function", "time", "coproc"].includes(firstName)) {
+    if (SHELL_RESERVED_WORDS.has(firstName)) {
       unsupported = true;
     }
 
@@ -773,27 +839,33 @@ function analyzeProgram(command, context, depth = 0) {
     let nodePgrepWatcher = false;
     const substitutionResults = new Map();
     for (const payload of position.wrapperPayloads) {
-      const nested = analyzeProgram(payload, nodeContext, depth + 1);
+      const nested = analyzeProgram(payload, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
       nodePgrepWatcher ||= nested.pgrepWatcher;
+      traversalError ||= nested.traversalError;
+      positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(payload)) unsupported = true;
     }
     for (const token of tokens) {
       if (token.type === "group") {
-        const nested = analyzeProgram(token.content, nodeContext, depth + 1);
+        const nested = analyzeProgram(token.content, nodeContext, depth + 1, depthLimit);
         nodeNestedProtected ||= nested.protectedFound;
         broadKill ||= nested.broadKill;
         nodePgrepWatcher ||= nested.pgrepWatcher;
+        traversalError ||= nested.traversalError;
+        positions.push(...nested.positions);
         if (nested.error && rawMentionsProtected(token.content)) unsupported = true;
       }
       if (token.type === "word") {
         for (const substitution of token.subs) {
-          const nested = analyzeProgram(substitution.content, nodeContext, depth + 1);
+          const nested = analyzeProgram(substitution.content, nodeContext, depth + 1, depthLimit);
           substitutionResults.set(substitution, nested);
           nodeNestedProtected ||= nested.protectedFound;
           broadKill ||= nested.broadKill;
           nodePgrepWatcher ||= nested.pgrepWatcher;
+          traversalError ||= nested.traversalError;
+          positions.push(...nested.positions);
           if (nested.error && rawMentionsProtected(substitution.content)) unsupported = true;
         }
       }
@@ -803,7 +875,7 @@ function analyzeProgram(command, context, depth = 0) {
     const shellPayload = shell?.kind === "command" ? shell.payload : null;
     const shellScript = shell?.kind === "script" ? shell.payload : shell?.operand || null;
     const sourceScript = sourcedScript(position);
-    const literalEvalPayload = evalPayload(position);
+    const evalPayloadValue = evalPayload(position);
     const heredocPayloads = shellHeredocPayloads(tokens, position);
     const hereStringPayloads = shellHereStringPayloads(tokens, position);
     for (const script of [shellScript, sourceScript]) {
@@ -811,21 +883,24 @@ function analyzeProgram(command, context, depth = 0) {
       nodeNestedProtected ||= Boolean(protectedIdentity(script.value, context.root)) || wordReferencesAny(script, nodeContext.protectedVariables);
       unclassifiableProtected ||= hasUnclassifiableProtectedExpansion(script, context.root);
     }
-    if (shellPayload && (!shellPayload.literal || shellPayload.subs.length > 0)) {
+    if (shellPayload) {
       if (wordReferencesAny(shellPayload, nodeContext.protectedVariables)) nodeNestedProtected = true;
-    } else if (shellPayload) {
-      const nested = analyzeProgram(shellPayload.value, nodeContext, depth + 1);
+      const nested = analyzeProgram(shellPayload.value, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
       nodePgrepWatcher ||= nested.pgrepWatcher;
+      traversalError ||= nested.traversalError;
+      positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(shellPayload.value)) unsupported = true;
     }
-    for (const payload of [literalEvalPayload, ...heredocPayloads, ...hereStringPayloads]) {
+    for (const payload of [evalPayloadValue, ...heredocPayloads, ...hereStringPayloads]) {
       if (payload === null) continue;
-      const nested = analyzeProgram(payload, nodeContext, depth + 1);
+      const nested = analyzeProgram(payload, nodeContext, depth + 1, depthLimit);
       nodeNestedProtected ||= nested.protectedFound;
       broadKill ||= nested.broadKill;
       nodePgrepWatcher ||= nested.pgrepWatcher;
+      traversalError ||= nested.traversalError;
+      positions.push(...nested.positions);
       if (nested.error && rawMentionsProtected(payload)) unsupported = true;
     }
 
@@ -862,9 +937,9 @@ function analyzeProgram(command, context, depth = 0) {
   if (unclassifiableProtected) unsupported = true;
   const broadKillFound = broadKill || (unsupported && rawMentionsBroadKill(command));
   if (unsupported && (protectedFound || rawMentionsProtected(command) || broadKillFound)) {
-    return { error: "unsupported compound grammar", protectedFound: true, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
+    return { error: "unsupported compound grammar", traversalError, positions, protectedFound: true, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
   }
-  return { error: "", protectedFound, directProtected, nestedProtected, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
+  return { error: "", traversalError, positions, protectedFound, directProtected, nestedProtected, broadKill: broadKillFound, pgrepWatcher, watcherPids: activeContext.watcherPids, program, nodeInfos };
 }
 
 function xModePathAllowed(value, home) {

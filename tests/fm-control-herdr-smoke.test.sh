@@ -50,15 +50,16 @@ export HERDR_SESSION="$SESSION"
 SCRATCH=
 LAB_PREPARED=0
 cleanup_all() {
-  local status=$? cleanup_status=0
+  local status=$? cleanup_status=0 dir
   trap - EXIT
   if [ -n "$SCRATCH" ]; then
-    if [ -d "$SCRATCH/home/state/hsmoke.git-hooks" ]; then
-      chmod u+w "$SCRATCH/home/state/hsmoke.git-hooks" || {
-        echo "not ok - could not restore write permission on test git hooks" >&2
+    for dir in "$SCRATCH/home/state/hsmoke.git-hooks" "$SCRATCH/home/state/hsmoke.github-guard-bin"; do
+      [ -d "$dir" ] || continue
+      chmod u+w "$dir" || {
+        echo "not ok - could not restore write permission on test guard directory: $dir" >&2
         cleanup_status=1
       }
-    fi
+    done
     rm -rf "$SCRATCH" || {
       echo "not ok - could not remove Herdr smoke scratch tree: $SCRATCH" >&2
       cleanup_status=1
