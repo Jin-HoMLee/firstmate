@@ -21,10 +21,44 @@ for tool in gh gh-axi; do
   cat >"$STUBS/$tool" <<'SH'
 #!/usr/bin/env bash
 printf '%s %s\n' "${0##*/}" "$*" >>"$FM_TEST_FORGE_LOG"
+if [ "${1:-}" = api ]; then
+  shift
+  expect_value=0
+  for arg in "$@"; do
+    if [ "$expect_value" -eq 1 ]; then expect_value=0; continue; fi
+    case "$arg" in
+      --repo|--repo=*) printf 'unknown flag: --repo\n' >&2; exit 64 ;;
+      --method|--header|--raw-field|--field|--input|--jq|--template|--hostname|--cache|--preview) expect_value=1 ;;
+      --) break ;;
+      --*) ;;
+      -?*)
+        short=${arg#-}
+        while [ -n "$short" ]; do
+          option=${short%"${short#?}"}
+          short=${short#?}
+          case "$option" in
+            R) printf 'unknown shorthand flag: R\n' >&2; exit 64 ;;
+            X|H|f|F|q|t|p) [ -n "$short" ] || expect_value=1; break ;;
+          esac
+        done
+        ;;
+    esac
+  done
+fi
 exit 0
 SH
   chmod +x "$STUBS/$tool"
 done
+
+for tool in gh gh-axi; do
+  status=0
+  FM_TEST_FORGE_LOG="$TMP_ROOT/cli-contract.log" "$STUBS/$tool" api graphql --repo kunchenguid/dotfiles \
+    >"$TMP_ROOT/cli-contract.out" 2>"$TMP_ROOT/cli-contract.err" || status=$?
+  [ "$status" -eq 64 ] || fail "synthetic API consumer must reject the unsupported repository flag"
+  FM_TEST_FORGE_LOG="$TMP_ROOT/cli-contract.log" "$STUBS/$tool" api graphql --template --repo --raw-field='query={viewer{login}}' \
+    || fail "synthetic API consumer must distinguish owned template data from repository flags"
+done
+pass "synthetic API boundary enforces the real repository-flag contract with option ownership"
 
 "$GUARD" install-shims "$SHIMS" || fail "guard shims should install"
 
@@ -90,7 +124,7 @@ pass "gh api org-level repository creation into kunchenguid is blocked"
 
 expect_refused gh api graphql -R someuser/somerepo -f 'query=mutation { createRepository(input:{name:"x", ownerId:"id"}) }'
 expect_allowed gh api graphql -f 'query={ organization(login:"kunchenguid"){ id } }'
-pass "gh api graphql mutations refuse through the normal path regardless of -R scope"
+pass "GraphQL reads remain available while mutations and API repository flags are refused"
 
 mutation='query=mutation { addComment(input:{subjectId:"protected-PR-node-id",body:"text"}) { clientMutationId } }'
 query='query={ organization(login:"kunchenguid"){ id } }'
@@ -155,7 +189,7 @@ for tool in gh gh-axi; do
     expect_allowed "$tool" api graphql "$flag" --help -f "$mutation"
     expect_allowed "$tool" api graphql "$flag" -h -f "$mutation"
   done
-  for option in --template -t --header -H --jq -q --cache --preview -p --hostname --repo -R; do
+  for option in --template -t --header -H --jq -q --cache --preview -p --hostname; do
     expect_refused "$tool" api graphql --include "$option" --help -f "$mutation"
     expect_allowed "$tool" api graphql --include "$option" --help -f "$query"
   done
@@ -164,6 +198,11 @@ for tool in gh gh-axi; do
   expect_allowed "$tool" api graphql --include --template --help -f "$mutation" --help
   expect_allowed "$tool" api --help
   expect_allowed "$tool" api /repos/kunchenguid/dotfiles/commits --include --template --help --method GET -f sha=main
+  for option in -R --repo; do
+    expect_refused "$tool" api graphql "$option" Jin-HoMLee/dotfiles -f "$query"
+    expect_refused "$tool" api graphql "$option=Jin-HoMLee/dotfiles" -f "$query"
+    expect_refused "$tool" "$option" Jin-HoMLee/dotfiles api graphql -f "$query"
+  done
 done
 pass "API help exemptions respect option ownership and non-consuming boolean flags"
 
@@ -316,6 +355,25 @@ for tool in gh gh-axi; do
   [ "$verdict" = allow ] || fail "primary policy blocked a proved fork destination with URL-valued content"
 done
 pass "only owned explicit selectors establish mutation targets, never attached title or body data"
+
+for tool in gh gh-axi; do
+  for top in pr issue; do
+    case "$top" in pr) path=pull ;; issue) path=issues ;; esac
+    for owner in kunchenguid Jin-HoMLee; do
+      url="https://github.com/$owner/dotfiles/$path/48"
+      expect_refused "$tool" "$top" close "$url" -R Jin-HoMLee/dotfiles
+      expect_refused "$tool" "$top" close "$url" -R kunchenguid/firstmate
+      verdict=$(node "$POLICY" --root "$ROOT" --command "$tool $top close $url -R Jin-HoMLee/dotfiles")
+      case "$verdict" in deny*) ;; *) fail "primary policy ignored an overriding positional selector: $verdict" ;; esac
+      expect_allowed "$tool" "$top" view "$url" -R Jin-HoMLee/dotfiles
+      expect_allowed "$tool" "$top" close "$url" -R Jin-HoMLee/dotfiles --help
+    done
+    expect_allowed "$tool" "$top" close 48 -R Jin-HoMLee/dotfiles
+    expect_refused "$tool" "$top" close 48 -R kunchenguid/dotfiles
+    expect_allowed "$tool" "$top" create -R Jin-HoMLee/dotfiles --title=Fix --body="$body_url"
+  done
+done
+pass "PR and issue URL mutations refuse overriding selectors while identifiers, URL-valued content and reads remain supported"
 
 for command in \
   'REPO=kunchenguid/dotfiles; gh pr create -R "$REPO" --title=Fix' \
@@ -718,6 +776,36 @@ done
 expect_push_policy allow "git push \"$fork_url\" HEAD"
 pass "primary pushes require literal arguments and explicit proved destinations without evaluating expansions"
 
+for command in \
+  'verb=push; git "$verb" https://github.com/kunchenguid/dotfiles.git HEAD' \
+  'verb=status; git "$verb" --short' \
+  'verb=push; git -C . "$verb" origin HEAD' \
+  'git "$(printf push)" origin HEAD' \
+  'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git git push origin HEAD' \
+  'env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git git push origin HEAD' \
+  "GIT_DIR='$protected_clone/.git' git push origin HEAD" \
+  "HOME='$TMP_ROOT/unproved-home' git push origin HEAD" \
+  "GIT_CONFIG_COUNT=1 sh -c 'git -C \"$push_home\" push origin HEAD'" \
+  'env --unset=GIT_CONFIG_COUNT git push origin HEAD' \
+  'env -i git push origin HEAD' \
+  "env -iC projects/upstream git -C '$push_home' push origin HEAD" \
+  'sudo git push origin HEAD'; do
+  expect_push_policy deny "$command"
+done
+for command in \
+  'path=README.md; git status --short "$path"' \
+  'branch=main; git log -1 "$branch"' \
+  'path=push; git -c user.name=push status --short "$path"' \
+  'GIT_CONFIG_COUNT=1 git status --short' \
+  'env -i git status --short' \
+  'git --help'; do
+  verdict=$(cd "$push_home" && node "$POLICY" --root "$ROOT" --command "$command")
+  [ "$verdict" = allow ] || fail "proved literal Git read or help command was refused: $verdict"
+done
+expect_push_policy allow 'FIXTURE=1 git push origin HEAD'
+expect_push_policy allow 'git push origin HEAD'
+pass "Git requires a proved literal subcommand and refuses unproved push environments without evaluating them"
+
 status=0
 "$GUARD" check git -C "$repo" -c remote.pushDefault=git@github.com:kunchenguid/dotfiles.git push \
   >"$TMP_ROOT/gitc1.out" 2>"$TMP_ROOT/gitc1.err" || status=$?
@@ -1031,32 +1119,35 @@ graphql_home="$TMP_ROOT/graphql-auth-home"
 printf '%s\n' 'Add exactly one test comment in kunchenguid/dotfiles.' >"$TMP_ROOT/graphql-words.txt"
 for tool in gh gh-axi; do
   for endpoint in graphql /graphql https://api.github.com/graphql; do
-    FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
-      "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
-      "$tool" api --method POST "$endpoint" -R kunchenguid/dotfiles -f "$mutation" \
-      || fail "explicit GraphQL authorization should still execute and audit through $endpoint"
+    for grant in kunchenguid/dotfiles kunchenguid/firstmate; do
+      for binding in none -R --repo; do
+        binding_args=()
+        [ "$binding" = none ] || binding_args=("$binding" kunchenguid/dotfiles)
+        before=$(wc -l <"$LOG" | tr -d ' ')
+        status=0
+        FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
+          "$GUARD" authorize --repo "$grant" --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
+          "$tool" api --method POST "$endpoint" "${binding_args[@]+"${binding_args[@]}"}" -f "$mutation" \
+          >"$TMP_ROOT/graphql-auth.out" 2>"$TMP_ROOT/graphql-auth.err" || status=$?
+        [ "$status" -eq 2 ] || fail "unsupported GraphQL mutation was authorized through $endpoint"
+        [ "$(wc -l <"$LOG" | tr -d ' ')" -eq "$before" ] || fail "GraphQL mutation reached the underlying CLI"
+        [ ! -d "$graphql_home/$tool/state/upstream-write-authorizations" ] || fail "unsupported GraphQL mutation created an operation grant record"
+      done
+    done
+    expect_refused "$tool" api "$endpoint" -f "$mutation"
+    expect_allowed "$tool" api "$endpoint" -f "$query"
   done
-  FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:/usr/bin:/bin" \
-    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
-    "$tool" api graphql --include --template --help -R kunchenguid/dotfiles -f "$mutation" \
-    || fail "a help-like template must retain exact mutation authorization and auditing"
-  [ "$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f | wc -l | tr -d ' ')" = 4 ] \
-    || fail "each equivalent GraphQL authorization should create its own audit record"
-  record=$(find "$graphql_home/$tool/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
-  [ -n "$record" ] || fail "GraphQL authorization did not create an audit record"
-  assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "GraphQL authorization omitted the exact repo"
-  assert_contains "$(cat "$record")" 'result=exit-0' "GraphQL authorization did not record execution success"
   before=$(wc -l <"$LOG" | tr -d ' ')
   status=0
   FM_TASK_ID=nested-worker FM_HOME="$graphql_home/$tool" FM_TEST_FORGE_LOG="$LOG" \
     BASH_ENV="$TMP_ROOT/guard-hops.sh" PATH="$child_shims:$parent_shims:$STUBS:/usr/bin:/bin" \
-    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/graphql-words.txt" -- \
-    "$tool" api --method POST graphql -R kunchenguid/dotfiles -f "$mutation" \
+    "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$words" -- \
+    "$tool" api --method POST /repos/kunchenguid/dotfiles/issues -f title=test \
     >"$TMP_ROOT/nested-worker.out" 2>"$TMP_ROOT/nested-worker.err" || status=$?
   [ "$status" -eq 2 ] || fail "nested workers must not authorize upstream writes"
   [ "$(wc -l <"$LOG" | tr -d ' ')" = "$before" ] || fail "nested worker authorization reached the forge"
 done
-pass "GraphQL option ordering retains exact audited authorization and the nested-worker authority boundary"
+pass "GraphQL mutations remain unsupported under every grant while reads and worker authority boundaries remain intact"
 
 for tool in gh gh-axi; do
   bounded_home="$TMP_ROOT/bounded-auth-$tool"
@@ -1067,8 +1158,8 @@ for tool in gh gh-axi; do
         operation_words='Open exactly one test issue in kunchenguid/dotfiles.'
         ;;
       api-template)
-        operation_args=(api graphql -R kunchenguid/dotfiles -it --help -f "$mutation")
-        operation_words='Add exactly one test comment in kunchenguid/dotfiles.'
+        operation_args=(api /repos/kunchenguid/dotfiles/issues -it --help -f title=test)
+        operation_words='Open exactly one test issue in kunchenguid/dotfiles.'
         ;;
       pr-draft)
         operation_args=(pr create -R kunchenguid/dotfiles --draft --title --help --body text)
@@ -1145,6 +1236,30 @@ for tool in gh gh-axi; do
   assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "body-valued authorization recorded content as its target"
   assert_contains "$(cat "$record")" 'result=exit-0' "body-valued authorization omitted execution success"
 done
+for tool in gh gh-axi; do
+  for top in pr issue; do
+    case "$top" in pr) path=pull ;; issue) path=issues ;; esac
+    for grant in kunchenguid/dotfiles kunchenguid/firstmate; do
+      expect_unsupported_authorization "$TMP_ROOT/url-auth-$tool-$top-${grant##*/}" "$grant" \
+        "$tool" "$top" close "https://github.com/kunchenguid/dotfiles/$path/48" -R "$grant"
+    done
+    expect_unsupported_authorization "$TMP_ROOT/identifier-mismatch-$tool-$top" kunchenguid/firstmate \
+      "$tool" "$top" close 48 -R kunchenguid/dotfiles
+    identifier_home="$TMP_ROOT/identifier-auth-$tool-$top"
+    printf 'Close %s 48 in kunchenguid/dotfiles.\n' "$top" >"$TMP_ROOT/identifier-words.txt"
+    before=$(wc -l <"$LOG" | tr -d ' ')
+    FM_HOME="$identifier_home" FM_TEST_FORGE_LOG="$LOG" PATH="$STUBS:$PATH" \
+      "$GUARD" authorize --repo kunchenguid/dotfiles --captain-words-file "$TMP_ROOT/identifier-words.txt" -- \
+      "$tool" "$top" close 48 -R kunchenguid/dotfiles || fail "ordinary identifier operation lost exact authorization"
+    [ "$(wc -l <"$LOG" | tr -d ' ')" -eq $((before + 1)) ] || fail "ordinary identifier authorization did not execute once"
+    record=$(find "$identifier_home/state/upstream-write-authorizations" -name '*.record' -type f -print | head -n 1)
+    [ -n "$record" ] || fail "ordinary identifier authorization omitted an audit record"
+    assert_contains "$(cat "$record")" 'repo=kunchenguid/dotfiles' "ordinary identifier audit named the wrong repository"
+    assert_contains "$(cat "$record")" 'result=exit-0' "ordinary identifier audit omitted execution success"
+  done
+done
+pass "exact grants cannot authorize positional URL selectors but retain audited identifier operations"
+
 for rewrite_repo in "${rewrite_repos[@]}"; do
   expect_unsupported_authorization "$rewrite_repo/direct-auth" kunchenguid/dotfiles \
     git -C "$rewrite_repo" push "$fork_url" HEAD

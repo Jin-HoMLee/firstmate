@@ -32,9 +32,62 @@ function checkTool(tool, args, root) {
   return null;
 }
 
-function checkToolWords(tool, words, root) {
-  if ((tool !== "git" || words.some((word) => word.value === "push")) &&
-      words.some((word) => !word.literal || word.unquotedExpansion || word.subs.length > 0)) {
+function isLiteral(word) {
+  return word.literal && !word.unquotedExpansion && word.subs.length === 0;
+}
+
+function gitCommandInfo(words) {
+  let anchoredDirectory = false;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    if (!isLiteral(word) || !word.value) return null;
+    const arg = word.value;
+    if (["-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace"].includes(arg)) {
+      const value = words[index + 1];
+      if (!value || !isLiteral(value)) return null;
+      if (arg === "-C") anchoredDirectory = isAbsolute(value.value) || anchoredDirectory;
+      index += 1;
+    } else if (arg.startsWith("-C") && arg.length > 2) {
+      anchoredDirectory = isAbsolute(arg.slice(2)) || anchoredDirectory;
+    } else if (/^(?:-c.+|--(?:config-env|git-dir|work-tree|namespace)=)/.test(arg)) {
+      continue;
+    } else if (["--help", "-h", "--version", "-v"].includes(arg)) {
+      return { subcommand: "help", anchoredDirectory };
+    } else if (["--no-pager", "--paginate", "--literal-pathspecs", "--no-replace-objects", "--no-optional-locks"].includes(arg)) {
+      continue;
+    } else if (arg.startsWith("-")) {
+      return null;
+    } else {
+      return { subcommand: arg, anchoredDirectory };
+    }
+  }
+  return { subcommand: "", anchoredDirectory };
+}
+
+function hasUnprovedGitEnvironment(position) {
+  const prefix = position.words.slice(0, position.index);
+  return prefix.some((word) => /^(?:GIT_[A-Za-z0-9_]*|HOME|XDG_CONFIG_HOME|PATH)=/.test(word.value)) ||
+    position.wrappers.includes("sudo") || position.wrapperEnvironmentChange ||
+    (position.wrappers.includes("env") && prefix.some((word) => !isLiteral(word)));
+}
+
+function checkToolWords(tool, words, root, unprovedGitEnvironment) {
+  const git = tool === "git" ? gitCommandInfo(words) : null;
+  if (tool === "git" && !git) {
+    return {
+      decision: "deny",
+      code: "protected-upstream-write",
+      reason: "Git subcommand must be proved literal before a read exemption can be granted",
+    };
+  }
+  if (git?.subcommand === "push" && unprovedGitEnvironment) {
+    return {
+      decision: "deny",
+      code: "protected-upstream-write",
+      reason: "command-local Git environment or user context cannot be verified for a push",
+    };
+  }
+  if ((tool !== "git" || git.subcommand === "push") && words.some((word) => !isLiteral(word))) {
     return {
       decision: "deny",
       code: "protected-upstream-write",
@@ -44,14 +97,14 @@ function checkToolWords(tool, words, root) {
   return checkTool(tool, words.map((word) => word.value), root);
 }
 
-function classifyPosition(position, root) {
+function classifyPosition(position, root, unprovedGitEnvironment) {
   if (!position.command) return null;
   if (position.unresolvedWrapperOption) {
     const words = position.words.slice(position.index);
     for (let i = 0; i < words.length; i += 1) {
       const candidate = base(words[i]?.value || "");
       if (!GUARD_TOOLS.has(candidate)) continue;
-      const denied = checkToolWords(candidate, words.slice(i + 1), root);
+      const denied = checkToolWords(candidate, words.slice(i + 1), root, unprovedGitEnvironment);
       if (denied) return denied;
     }
     return null;
@@ -59,7 +112,7 @@ function classifyPosition(position, root) {
   const tool = base(position.command.value);
   if (!GUARD_TOOLS.has(tool)) return null;
   const args = position.words.slice(position.index + 1);
-  return checkToolWords(tool, args, root);
+  return checkToolWords(tool, args, root, unprovedGitEnvironment);
 }
 
 function decodeWord(word) {
@@ -77,27 +130,8 @@ function rawLexErrorMention(command) {
 
 function gitPushInfo(position) {
   if (!position.command || base(position.command.value) !== "git") return null;
-  const args = position.words.slice(position.index + 1);
-  let expectC = false;
-  let expectValue = false;
-  let anchoredDirectory = false;
-  for (const word of args) {
-    const arg = word.value;
-    if (expectC) {
-      anchoredDirectory = word.literal && (isAbsolute(arg) || anchoredDirectory);
-      expectC = false;
-      continue;
-    }
-    if (expectValue) {
-      expectValue = false;
-      continue;
-    }
-    if (arg === "-C") expectC = true;
-    else if (arg.length > 2 && arg.startsWith("-C")) anchoredDirectory = word.literal && (isAbsolute(arg.slice(2)) || anchoredDirectory);
-    else if (arg === "-c" || arg === "--config-env") expectValue = true;
-    else if (arg === "push") return { anchoredDirectory };
-  }
-  return null;
+  const info = gitCommandInfo(position.words.slice(position.index + 1));
+  return info?.subcommand === "push" ? info : null;
 }
 
 function isDirectoryChange(position) {
@@ -113,8 +147,10 @@ function isDirectoryChange(position) {
 function decision(command, root = defaultRoot) {
   const context = { root, home: root, protectedVariables: new Set(), watcherPatterns: new Set(), watcherPids: new Set() };
   const { traversalError, positions } = analyzeProgram(command, context, 0, 64);
+  let unprovedGitEnvironment = false;
   for (const { position } of positions) {
-    const denied = classifyPosition(position, root);
+    unprovedGitEnvironment ||= hasUnprovedGitEnvironment(position);
+    const denied = classifyPosition(position, root, unprovedGitEnvironment);
     if (denied) return denied;
   }
   let directoryChanged = false;

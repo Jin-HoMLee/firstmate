@@ -25,9 +25,9 @@
 # or an API /repos/<owner>/<repo>/ path. This deliberately refuses mutation commands that
 # rely on fork-aware default resolution: gh may select a fork's parent even
 # when origin is the personal fork. Read-only commands stay available with or
-# without a selector. gh api graphql mutations are refused even when named,
-# because query-body targets cannot be verified locally; only authorize may run
-# one.
+# without a selector. gh api graphql mutations are unsupported, including under
+# authorize, because query-body targets cannot be verified locally. The API
+# command does not support -R/--repo; REST repository paths supply its target.
 # Note: git push --no-verify skips the pre-push check and is an accepted, deliberate-action-only residual.
 set -u
 
@@ -197,7 +197,7 @@ gh_option_kind() {
 
 normalize_gh_arguments() {
   local top='' sub='' arg option value tail kind attached options=1
-  GH_ARGS=() GH_DESTINATION_ARGS=() GH_HELP=0 GH_OPTIONS_KNOWN=1
+  GH_ARGS=() GH_DESTINATION_ARGS=() GH_HELP=0 GH_OPTIONS_KNOWN=1 GH_POSITIONAL_URL=0 GH_HAS_REPO_OPTION=0
   while [ "$#" -gt 0 ]; do
     arg=$1
     shift
@@ -208,6 +208,7 @@ normalize_gh_arguments() {
       *)
         GH_ARGS+=("$arg")
         GH_DESTINATION_ARGS+=("$arg")
+        case "$arg" in *://*|github.com/*|git@github.com:*) GH_POSITIONAL_URL=1 ;; esac
         if [ -z "$top" ]; then top=$arg; elif [ -z "$sub" ]; then sub=$arg; fi
         continue
         ;;
@@ -238,7 +239,7 @@ normalize_gh_arguments() {
             shift
           fi
           GH_ARGS+=("$option" "$value")
-          if [ "$kind" = repo ]; then GH_DESTINATION_ARGS+=("$option" "$value"); fi
+          if [ "$kind" = repo ]; then GH_HAS_REPO_OPTION=1; GH_DESTINATION_ARGS+=("$option" "$value"); fi
           ;;
         boolean|help)
           case "$tail" in =*) value=${tail#=}; attached=1; tail='' ;; esac
@@ -324,8 +325,8 @@ classify_gh() {
   set -- "${GH_ARGS[@]+"${GH_ARGS[@]}"}"
   parse_top_sub_and_target "$tool" "$@"
   if [ -n "$API_METHOD" ]; then method=$API_METHOD; method_explicit=1; fi
-  if [ "$TOP" = api ] && [ "$GH_OPTIONS_KNOWN" -eq 0 ]; then
-    ARGUMENT_ERROR='unsupported or incomplete gh api options; use unambiguous supported options'
+  if [ "$TOP" = api ] && { [ "$GH_OPTIONS_KNOWN" -eq 0 ] || [ "$GH_HAS_REPO_OPTION" -eq 1 ]; }; then
+    ARGUMENT_ERROR='unsupported or incomplete gh api options; API commands do not support -R/--repo'
     return 0
   fi
   if [ "$GH_OPTIONS_KNOWN" -eq 1 ] && [ "$GH_HELP" -eq 1 ]; then return 0; fi
@@ -470,8 +471,14 @@ classify_gh() {
       # An explicit protected selector is still refused below if they do.
       ;;
   esac
-  if [ "$MUTATION" -eq 1 ] && { [ "$GH_OPTIONS_KNOWN" -eq 0 ] || [ "$TARGET_UNPROVED" -eq 1 ]; }; then
-    ARGUMENT_ERROR='repository mutation has unsupported options or an unproved destination; use supported options and an explicit repository'
+  if [ "$MUTATION" -eq 1 ]; then
+    if [ "$TOP" = api ] && [ "$SUB" = graphql ]; then
+      ARGUMENT_ERROR='GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally'
+    elif { [ "$TOP" = pr ] || [ "$TOP" = issue ]; } && [ "$GH_POSITIONAL_URL" -eq 1 ]; then
+      ARGUMENT_ERROR='positional PR/issue URLs are unsupported for mutations; use an ordinary identifier and -R/--repo'
+    elif [ "$GH_OPTIONS_KNOWN" -eq 0 ] || [ "$TARGET_UNPROVED" -eq 1 ]; then
+      ARGUMENT_ERROR='repository mutation has unsupported options or an unproved destination; use supported options and an explicit repository'
+    fi
   fi
 }
 
@@ -486,10 +493,6 @@ check_gh() {
   if [ -n "$ARGUMENT_ERROR" ]; then refuse_reason "$ARGUMENT_ERROR"; return 2; fi
   if [ "$TARGET" = AMBIGUOUS ]; then
     refuse_reason "conflicting or incomplete repository selectors; refusing before any GitHub operation"
-    return 2
-  fi
-  if [ "$TOP" = api ] && [ "$SUB" = graphql ] && [ "$MUTATION" -eq 1 ]; then
-    refuse_reason "gh api graphql mutation must run through the exact captain-authorized interface (query-body targets cannot be verified locally)"
     return 2
   fi
   if [ "$MUTATION" -eq 1 ] && [ "$REPO_SCOPED" -eq 1 ] && [ -z "$TARGET" ]; then

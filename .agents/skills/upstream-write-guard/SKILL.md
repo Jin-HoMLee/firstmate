@@ -18,6 +18,7 @@ The recurring failure this closes is fork-aware GitHub CLI resolution.
 A mutating `gh pr create` or `gh-axi pr create` without `-R/--repo` can select the parent repository even when `origin` names a personal fork.
 The guard therefore requires every repository mutation to carry an explicit repository selector and blocks protected destinations before the CLI runs.
 Read-only commands remain allowed, including reads explicitly aimed at protected upstream repositories.
+GraphQL mutations are unsupported even with an exact repository grant; API commands have no `-R/--repo` binding, so use a supported repository-scoped REST operation where one exists.
 
 ## Authority and override
 

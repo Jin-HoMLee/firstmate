@@ -507,26 +507,29 @@ function consumeWrapperOptions(name, words, index) {
   const long = WRAPPER_LONG_OPTIONS[optionOwner];
   const embeddedPayloads = [];
   let directoryChange = false;
+  let environmentChange = false;
   let next = index;
   while (words[next]) {
     const value = words[next].value;
-    if (value === "--") return { index: next + 1, unresolved: false, embeddedPayloads, directoryChange };
-    if (!value.startsWith("-") || value === "-") return { index: next, unresolved: false, embeddedPayloads, directoryChange };
+    if (value === "--") return { index: next + 1, unresolved: false, embeddedPayloads, directoryChange, environmentChange };
+    if (!value.startsWith("-") || value === "-") return { index: next, unresolved: false, embeddedPayloads, directoryChange, environmentChange };
     if (value.startsWith("--")) {
       const equals = value.indexOf("=");
       const option = value.slice(2, equals === -1 ? undefined : equals);
       if (long.noArgument.has(option)) {
+        if (name === "env" && option === "ignore-environment") environmentChange = true;
         next += 1;
         continue;
       }
-      if (!long.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
+      if (!long.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
       if (name === "env" && option === "chdir") directoryChange = true;
+      else if (name === "env") environmentChange = true;
       if (equals !== -1) {
         if (name === "env" && option === "split-string") embeddedPayloads.push(value.slice(equals + 1));
         next += 1;
         continue;
       }
-      if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
+      if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
       if (name === "env" && option === "split-string") embeddedPayloads.push(words[next + 1].value);
       next += 2;
       continue;
@@ -534,11 +537,15 @@ function consumeWrapperOptions(name, words, index) {
     let consumedArgument = false;
     for (let offset = 1; offset < value.length; offset += 1) {
       const option = value[offset];
-      if (short.noArgument.has(option)) continue;
-      if (!short.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
+      if (short.noArgument.has(option)) {
+        if (name === "env" && option === "i") environmentChange = true;
+        continue;
+      }
+      if (!short.takesArgument.has(option)) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
       if (name === "env" && option === "C") directoryChange = true;
+      else if (name === "env") environmentChange = true;
       if (offset + 1 === value.length) {
-        if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange };
+        if (!words[next + 1]) return { index: next, unresolved: true, embeddedPayloads, directoryChange, environmentChange };
         if (name === "env" && option === "S") embeddedPayloads.push(words[next + 1].value);
         next += 2;
       } else {
@@ -550,7 +557,7 @@ function consumeWrapperOptions(name, words, index) {
     }
     if (!consumedArgument) next += 1;
   }
-  return { index: next, unresolved: false, embeddedPayloads, directoryChange };
+  return { index: next, unresolved: false, embeddedPayloads, directoryChange, environmentChange };
 }
 
 export function commandPosition(tokens) {
@@ -560,6 +567,7 @@ export function commandPosition(tokens) {
   const prefixAssignments = index;
   const wrappers = [];
   let wrapperDirectoryChange = false;
+  let wrapperEnvironmentChange = false;
   let unresolvedWrapperOption = false;
   const wrapperPayloads = [];
   let command = words[index];
@@ -581,6 +589,7 @@ export function commandPosition(tokens) {
       wrappers.push(name);
       const options = consumeWrapperOptions(name, words, index + 1);
       wrapperDirectoryChange ||= options.directoryChange;
+      wrapperEnvironmentChange ||= options.environmentChange;
       unresolvedWrapperOption ||= options.unresolved;
       wrapperPayloads.push(...options.embeddedPayloads);
       index = options.index;
@@ -614,7 +623,7 @@ export function commandPosition(tokens) {
     }
     break;
   }
-  return { words, index, command, wrappers, prefixAssignments, unresolvedWrapperOption, wrapperPayloads, wrapperDirectoryChange };
+  return { words, index, command, wrappers, prefixAssignments, unresolvedWrapperOption, wrapperPayloads, wrapperDirectoryChange, wrapperEnvironmentChange };
 }
 
 const PROTECTED_SCRIPTS = [
@@ -726,6 +735,7 @@ function shiftPastReservedWords(position) {
     unresolvedWrapperOption: position.unresolvedWrapperOption || unwrapped.unresolvedWrapperOption,
     wrapperPayloads: [...position.wrapperPayloads, ...unwrapped.wrapperPayloads],
     wrapperDirectoryChange: position.wrapperDirectoryChange || unwrapped.wrapperDirectoryChange,
+    wrapperEnvironmentChange: position.wrapperEnvironmentChange || unwrapped.wrapperEnvironmentChange,
   };
 }
 
