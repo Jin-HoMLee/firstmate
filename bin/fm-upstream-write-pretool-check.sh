@@ -50,7 +50,7 @@ PREFILTER=${PREFILTER//\'/}
 case "$CMD" in
   *"\$'"*|*'$"'*) ;;
   *)
-    case "$PREFILTER" in *gh*|*git*push*) ;; *) exit 0 ;; esac
+    case "$PREFILTER" in *gh*|*git*) ;; *) exit 0 ;; esac
     ;;
 esac
 

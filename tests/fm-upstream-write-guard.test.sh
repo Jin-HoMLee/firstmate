@@ -1051,6 +1051,47 @@ FM_ROOT_OVERRIDE="$primary" "$primary/bin/fm-upstream-write-pretool-check.sh" \
 [ "$status" -eq 2 ] || fail "plain primary PreToolUse transport should deny the ANSI-C quoted protected write, got $status"
 pass "ordinary primary shell commands share the same write guard"
 
+expect_primary_git_transport() {
+  local expected=$1 command=$2 writes=${3:-0} status=0 before
+  before=$(wc -l <"$push_log" | tr -d ' ')
+  (
+    cd "$push_home" || exit 1
+    jq -n --arg command "$command" '{tool_input: {command: $command}}' |
+      FM_ROOT_OVERRIDE="$primary" FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" \
+        PATH="$push_stubs:$PATH" "$primary/bin/fm-upstream-write-pretool-check.sh"
+  ) >"$TMP_ROOT/primary-git.out" 2>"$TMP_ROOT/primary-git.err" || status=$?
+  if [ "$status" -eq 0 ]; then
+    (
+      cd "$push_home" || exit 1
+      FM_TEST_REAL_GIT="$real_git" FM_TEST_PUSH_LOG="$push_log" PATH="$push_stubs:$PATH" \
+        bash -c "$command"
+    ) >"$TMP_ROOT/primary-git-exec.out" 2>"$TMP_ROOT/primary-git-exec.err" \
+      || fail "allowed primary Git command failed: $command"
+  fi
+  case "$expected/$status" in
+    deny/2)
+      jq -e '.decision == "deny" and (.reason | contains("[protected-upstream-write]"))' \
+        "$TMP_ROOT/primary-git.out" >/dev/null || fail "primary Git denial omitted the stable protocol"
+      ;;
+    allow/0) ;;
+    *) fail "primary Git transport expected $expected for $command, got status $status" ;;
+  esac
+  [ "$(wc -l <"$push_log" | tr -d ' ')" -eq "$((before + writes))" ] \
+    || fail "primary Git transport allowed an unexpected mock write: $command"
+}
+
+expect_primary_git_transport deny 'verb=push; git "$verb" https://github.com/kunchenguid/dotfiles.git HEAD'
+expect_primary_git_transport deny 'verb=status; git "$verb" --short'
+for separator in ';' '&&'; do
+  expect_primary_git_transport deny "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git $separator git push origin HEAD"
+done
+expect_primary_git_transport allow 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git; git status --short'
+expect_primary_git_transport allow 'git status --short'
+expect_primary_git_transport allow 'path=README.md; git diff -- "$path"'
+expect_primary_git_transport allow 'export FIXTURE=1; git push origin HEAD' 1
+expect_primary_git_transport allow 'git push origin HEAD' 1
+pass "primary transport proves Git subcommands and refuses exported push overrides while retaining reads and fork pushes"
+
 PLUGIN="$ROOT/.opencode/plugins/fm-primary-upstream-write-check.js" WORKTREE="$primary" node --input-type=module <<'JS' || fail "OpenCode upstream-write hooks should enforce the existing policy on both runtimes"
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";

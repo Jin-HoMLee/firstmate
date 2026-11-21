@@ -66,7 +66,9 @@ function gitCommandInfo(words) {
 
 function hasUnprovedGitEnvironment(position) {
   const prefix = position.words.slice(0, position.index);
-  return prefix.some((word) => /^(?:GIT_[A-Za-z0-9_]*|HOME|XDG_CONFIG_HOME|PATH)=/.test(word.value)) ||
+  const bindings = base(position.command?.value || "") === "export"
+    ? [...prefix, ...position.words.slice(position.index + 1)] : prefix;
+  return bindings.some((word) => /^(?:GIT_[A-Za-z0-9_]*|HOME|XDG_CONFIG_HOME|PATH)(?:=|$)/.test(word.value)) ||
     position.wrappers.includes("sudo") || position.wrapperEnvironmentChange ||
     (position.wrappers.includes("env") && prefix.some((word) => !isLiteral(word)));
 }
