@@ -375,6 +375,7 @@ for tool in gh gh-axi; do
 done
 pass "PR and issue URL mutations refuse overriding selectors while identifiers, URL-valued content and reads remain supported"
 
+# shellcheck disable=SC2016 # Commands stay literal for later policy inspection.
 for command in \
   'REPO=kunchenguid/dotfiles; gh pr create -R "$REPO" --title=Fix' \
   'Q=mutation; gh api graphql -f "query=$Q"' \
@@ -751,6 +752,7 @@ for destinations in protected mixed personal duplicate; do
 done
 pass "complete multi-push destination sets are refused, regardless of ordering or ownership"
 
+# shellcheck disable=SC2016 # Commands stay literal for later policy inspection.
 for command in \
   'OWNER=kunchenguid; git push "https://github.com/${OWNER}/dotfiles.git" HEAD' \
   'REMOTE=origin; git push "$REMOTE" HEAD' \
@@ -760,12 +762,14 @@ for command in \
   'nice -10 git push "https://github.com/${OWNER}/dotfiles.git" HEAD'; do
   expect_push_policy deny "$command"
 done
+# shellcheck disable=SC2016 # URL stays literal for later policy inspection.
 expect_shared_push_refused -C "$push_home" push 'https://github.com/${OWNER}/dotfiles.git' HEAD
 expect_shared_push_refused -C "$push_home" push '' HEAD
 expect_shared_push_refused -C "$push_home" push --repo=origin --repo=origin HEAD
 expect_shared_push_refused -C "$push_home" push origin --repo=origin HEAD
 expect_shared_push_refused -C "$protected_clone" push origin -o --help HEAD
 expect_shared_push_refused -C "$protected_clone" push --unproved-option --help origin HEAD
+# shellcheck disable=SC2016 # Commands stay literal for later policy inspection.
 for command in \
   'OWNER=kunchenguid; git ls-remote "https://github.com/${OWNER}/dotfiles.git"' \
   'git push --help' \
@@ -776,6 +780,7 @@ done
 expect_push_policy allow "git push \"$fork_url\" HEAD"
 pass "primary pushes require literal arguments and explicit proved destinations without evaluating expansions"
 
+# shellcheck disable=SC2016 # Commands stay literal for later policy inspection.
 for command in \
   'verb=push; git "$verb" https://github.com/kunchenguid/dotfiles.git HEAD' \
   'verb=status; git "$verb" --short' \
@@ -792,6 +797,7 @@ for command in \
   'sudo git push origin HEAD'; do
   expect_push_policy deny "$command"
 done
+# shellcheck disable=SC2016 # Commands stay literal for later policy inspection.
 for command in \
   'path=README.md; git status --short "$path"' \
   'branch=main; git log -1 "$branch"' \
@@ -1080,13 +1086,16 @@ expect_primary_git_transport() {
     || fail "primary Git transport allowed an unexpected mock write: $command"
 }
 
+# shellcheck disable=SC2016 # Command stays literal for later transport inspection.
 expect_primary_git_transport deny 'verb=push; git "$verb" https://github.com/kunchenguid/dotfiles.git HEAD'
+# shellcheck disable=SC2016 # Command stays literal for later transport inspection.
 expect_primary_git_transport deny 'verb=status; git "$verb" --short'
 for separator in ';' '&&'; do
   expect_primary_git_transport deny "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git $separator git push origin HEAD"
 done
 expect_primary_git_transport allow 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git; git status --short'
 expect_primary_git_transport allow 'git status --short'
+# shellcheck disable=SC2016 # Command stays literal for later transport inspection.
 expect_primary_git_transport allow 'path=README.md; git diff -- "$path"'
 expect_primary_git_transport allow 'export FIXTURE=1; git push origin HEAD' 1
 expect_primary_git_transport allow 'git push origin HEAD' 1
@@ -1321,6 +1330,7 @@ for multi_repo in "${multi_repos[@]}"; do
     expect_unsupported_authorization "$multi_repo/auth-${grant##*/}" "$grant" git -C "$multi_repo" push origin HEAD
   done
 done
+# shellcheck disable=SC2016 # URL stays literal for later policy inspection.
 expect_unsupported_authorization "$TMP_ROOT/variable-url-auth" kunchenguid/dotfiles \
   git -C "$push_home" push 'https://github.com/${OWNER}/dotfiles.git' HEAD
 pass "unsupported targets cannot execute under absent, mismatched or single-repository grants"
