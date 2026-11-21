@@ -12,13 +12,10 @@ metadata:
 # Protected upstream write guard
 
 Every `kunchenguid/*` repository is read-only to ordinary Firstmate and worker commands.
-This is mechanical, not a reminder: spawned workers receive guarded `gh`, `gh-axi`, and git pre-push paths, while primary Firstmate sessions run the same classifier before shell commands.
+[`docs/configuration.md` "Protected upstream writes"](../../../docs/configuration.md#protected-upstream-writes) owns the guarded paths, supported command subset, primary harness coverage and enforcement limits.
 
 The recurring failure this closes is fork-aware GitHub CLI resolution.
 A mutating `gh pr create` or `gh-axi pr create` without `-R/--repo` can select the parent repository even when `origin` names a personal fork.
-The guard therefore requires every repository mutation to carry an explicit repository selector and blocks protected destinations before the CLI runs.
-Read-only commands remain allowed, including reads explicitly aimed at protected upstream repositories.
-GraphQL mutations are unsupported even with an exact repository grant; API commands have no `-R/--repo` binding, so use a supported repository-scoped REST operation where one exists.
 
 ## Authority and override
 
@@ -29,7 +26,7 @@ Workers cannot invoke the override and must report the refusal to firstmate.
 After receiving the exact authorization, Firstmate:
 
 1. Writes the captain's exact words, without paraphrase or speaker label, to a private regular file under this home's task or decision data.
-2. Makes the GitHub command name the exact repository with `-R/--repo`, an owner-qualified `gh repo` destination, or an API `/repos/<owner>/<repo>/...` path; for git, names one explicit remote whose single locally resolved push URL is that exact repository.
+2. Selects a supported explicit-destination invocation under the configuration contract linked above, naming only the exact authorized repository.
 3. Runs:
 
    ```sh
@@ -42,7 +39,8 @@ After receiving the exact authorization, Firstmate:
    Use `gh` or `git push` after `--` only when that is the operation the captain authorized.
 
 The command refuses a different repository, a read-only operation, a worker process, an absent or empty words file, and an unresolved git destination.
-Before executing, it writes a mode-0600 record under `state/upstream-write-authorizations/` containing the exact repository, shell-quoted command, hash and exact text of the captain's words, timestamp, and eventual exit status.
+Before executing, it must successfully write a mode-0600 record under `state/upstream-write-authorizations/` containing the exact repository, shell-quoted command, hash and exact text of the captain's words, timestamp, and a pending result.
+After execution it attempts to append the exit status; an interrupted command or failed append can leave the result pending, which is not proof of completion.
 There is no reusable token, environment bypass, broad allowlist, or standing exception.
 
 `bin/fm-upstream-write-guard.sh` owns exact parsing and execution mechanics.

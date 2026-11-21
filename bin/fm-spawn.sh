@@ -710,14 +710,13 @@
 # ~/.cursor/cli-config.json attribution-off is not durable (it does not travel
 # with this repo, defaults back to on when unset, and only feeds the CLI's
 # request to the server, so it suppresses the trailer rather than preventing
-# it). Unless config/keep-ai-trailers is present, every spawn installs
-# state/<id>.git-hooks as an appended GIT_CONFIG core.hooksPath entry for the pane, so git
-# commit-msg strips known AI trailers at the commit object for every launched
-# runtime, Claude included as defense in depth. bin/fm-git-strip-ai-trailers.sh
-# owns the identities, the hook install, and chaining the repository git is
-# actually running in so a project husky hook still runs. Author identity is
-# not rewritten. A forge=external ship installs that directory even under
-# config/keep-ai-trailers, because its pre-push wrapper carries the push guard.
+# it). Every spawn selects state/<id>.git-hooks for upstream-write safety;
+# docs/configuration.md "Protected upstream writes" owns that boundary.
+# Unless config/keep-ai-trailers is present, commit-msg also strips known AI
+# trailers at the commit object for every launched runtime, Claude included as
+# defense in depth. bin/fm-git-strip-ai-trailers.sh owns the identities, the hook
+# install, and chaining the repository git is actually running in so a project
+# husky hook still runs. Author identity is not rewritten.
 # T3 Code owns its provider command, so it cannot receive Claude's inline
 # attribution settings; the Git hook and environment overlay still apply.
 # Publishing the record and moving this home's backlog item to In flight are one
