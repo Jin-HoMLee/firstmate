@@ -510,12 +510,11 @@ check_gh() {
   return 0
 }
 
-GIT_REMOTE='' GIT_REMOTE_URL='' GIT_TARGET=''
+GIT_REMOTE='' GIT_TARGET=''
 parse_git_push() {
   local arg after_push=0 expect_c=0 expect_repo=0 expect_c_override=0 fail_closed=0 candidates rule prefix rules rule_status
   local -a global_args=()
   GIT_REMOTE=
-  GIT_REMOTE_URL=
   GIT_TARGET=
   for arg in "$@"; do
     if [ "$expect_c" -eq 1 ]; then global_args+=( -C "$arg" ); expect_c=0; continue; fi
@@ -579,7 +578,6 @@ parse_git_push() {
     *$'\n'*) return 3 ;;
     *'$'*|*'`'*|*'*'*|*'?'*|*'['*|*']'*|*'{'*|*'}'*) return 2 ;;
   esac
-  GIT_REMOTE_URL=$candidates
   case "$candidates" in
     /*) GIT_TARGET=local:$candidates ;;
     *) GIT_TARGET=$(normalize_repo "$candidates" 2>/dev/null) || return 2 ;;
