@@ -1,0 +1,173 @@
+PROTECTED-WRITE CLI DEMONSTRATION
+All repositories, captain words, payloads and tools below are synthetic.
+Underlying writes are mocks; no network, live forge, fleet, service, or installed home is used.
+Commands are run against a plain primary fixture because the PreToolUse transport intentionally skips linked worker worktrees.
+
+--- Primary PreToolUse refuses an unproved Git write ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-pretool-check.sh
+stdin: {"tool_input": {"command": "verb=push; git \"$verb\" https://github.com/kunchenguid/dotfiles.git HEAD"}}
+exit: 2
+stdout:
+{"decision":"deny","reason":"[protected-upstream-write] Git subcommand must be proved literal before a read exemption can be granted"}
+stderr:
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"},"systemMessage":"[protected-upstream-write] Git subcommand must be proved literal before a read exemption can be granted"}
+
+Observable side effect: underlying mock write log unchanged.
+
+--- Primary PreToolUse refuses an unproved Git write ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-pretool-check.sh
+stdin: {"tool_input": {"command": "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git; git push origin HEAD"}}
+exit: 2
+stdout:
+{"decision":"deny","reason":"[protected-upstream-write] command-local Git environment or user context cannot be verified for a push"}
+stderr:
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"},"systemMessage":"[protected-upstream-write] command-local Git environment or user context cannot be verified for a push"}
+
+Observable side effect: underlying mock write log unchanged.
+
+--- Cursor receives its native denial protocol ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-pretool-check.sh --cursor
+stdin: {"toolInput": {"command": "verb=push; git \"$verb\" origin HEAD"}}
+exit: 0
+stdout:
+{"permission":"deny","user_message":"[protected-upstream-write] Git subcommand must be proved literal before a read exemption can be granted"}
+
+--- Supported literal command passes the primary hook ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-pretool-check.sh
+stdin: {"tool_input": {"command": "git status --short"}}
+exit: 0
+(no output)
+
+--- End-user shell executes the permitted command ---
+$ bash -c 'git status --short'
+exit: 0
+stdout:
+?? AGENTS.md
+?? README.md
+?? bin/
+
+--- Supported literal command passes the primary hook ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-pretool-check.sh
+stdin: {"tool_input": {"command": "path=README.md; git diff -- \"$path\""}}
+exit: 0
+(no output)
+
+--- End-user shell executes the permitted command ---
+$ bash -c 'path=README.md; git diff -- "$path"'
+exit: 0
+(no output)
+
+--- Supported literal command passes the primary hook ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-pretool-check.sh
+stdin: {"tool_input": {"command": "git push origin HEAD"}}
+exit: 0
+(no output)
+
+--- End-user shell executes the permitted command ---
+$ bash -c 'git push origin HEAD'
+exit: 0
+stdout:
+MOCK git push origin HEAD (no network)
+
+--- Equivalent GraphQL mutations are unsupported ---
+$ gh api --method POST graphql -f 'query=mutation { addComment(input:{subjectId:"synthetic-protected-id",body:"test"}) { clientMutationId } }'
+exit: 2
+stderr:
+upstream-write-guard: GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally
+
+--- Equivalent proved GraphQL read through nested shims ---
+$ gh api graphql '--raw-field=query={viewer{login}}'
+exit: 0
+stdout:
+MOCK gh api graphql --raw-field=query={viewer{login}} (no network)
+
+--- Equivalent GraphQL mutations are unsupported ---
+$ gh api --method POST /graphql -f 'query=mutation { addComment(input:{subjectId:"synthetic-protected-id",body:"test"}) { clientMutationId } }'
+exit: 2
+stderr:
+upstream-write-guard: GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally
+
+--- Equivalent proved GraphQL read through nested shims ---
+$ gh api /graphql '--raw-field=query={viewer{login}}'
+exit: 0
+stdout:
+MOCK gh api /graphql --raw-field=query={viewer{login}} (no network)
+
+--- Equivalent GraphQL mutations are unsupported ---
+$ gh api --method POST https://api.github.com/graphql -f 'query=mutation { addComment(input:{subjectId:"synthetic-protected-id",body:"test"}) { clientMutationId } }'
+exit: 2
+stderr:
+upstream-write-guard: GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally
+
+--- Equivalent proved GraphQL read through nested shims ---
+$ gh api https://api.github.com/graphql '--raw-field=query={viewer{login}}'
+exit: 0
+stdout:
+MOCK gh api https://api.github.com/graphql --raw-field=query={viewer{login}} (no network)
+
+--- An unrelated template cannot establish a safe input body ---
+$ gh api /graphql --input synthetic-not-opened.json --template query=sent
+exit: 2
+stderr:
+upstream-write-guard: GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally
+
+--- Explicit GET fields remain read-only ---
+$ gh api --method GET /repos/kunchenguid/dotfiles/commits -f sha=main -F per_page=100
+exit: 0
+stdout:
+MOCK gh api --method GET /repos/kunchenguid/dotfiles/commits -f sha=main -F per_page=100 (no network)
+
+--- Protected PR merge is refused ---
+$ gh pr merge 48 -R kunchenguid/dotfiles
+exit: 2
+stderr:
+upstream-write-guard: repository mutation against protected upstream 'kunchenguid/dotfiles' requires the exact captain-authorized interface
+
+--- Explicit personal-fork PR creation still executes ---
+$ gh pr create -R Jin-HoMLee/firstmate --title 'Synthetic integration'
+exit: 0
+stdout:
+MOCK gh pr create -R Jin-HoMLee/firstmate --title Synthetic integration (no network)
+
+--- Exact primary authorization executes and records the operation ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-guard.sh authorize --repo kunchenguid/dotfiles --captain-words-file <synthetic-fixture>/synthetic-captain-words.txt -- gh issue create -R kunchenguid/dotfiles --title 'synthetic test'
+exit: 0
+stdout:
+MOCK gh issue create -R kunchenguid/dotfiles --title synthetic test (no network)
+
+Persisted authorization record (public audit interface, synthetic data):
+version=1
+created=20261121T004253Z
+repo=kunchenguid/dotfiles
+command=gh issue create -R kunchenguid/dotfiles --title synthetic\ test
+captain_words_sha256=fe1243475d699b37283271afcd3c35fcb0f8951bb1141fb98dba556aa6c5f287
+captain_words<<EOF
+Open exactly one synthetic test issue in kunchenguid/dotfiles.
+
+EOF
+result=pending
+result=exit-0
+
+--- A grant cannot enable an unsupported GraphQL mutation ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-guard.sh authorize --repo kunchenguid/dotfiles --captain-words-file <synthetic-fixture>/synthetic-captain-words.txt -- gh api graphql -f 'query=mutation { addComment(input:{subjectId:"synthetic-protected-id",body:"test"}) { clientMutationId } }'
+exit: 2
+stderr:
+error: GraphQL mutations are unsupported, including under authorization; query-body targets cannot be verified locally
+
+--- Audit creation failure refuses before execution ---
+$ <synthetic-fixture>/primary/bin/fm-upstream-write-guard.sh authorize --repo kunchenguid/dotfiles --captain-words-file <synthetic-fixture>/synthetic-captain-words.txt -- gh issue create -R kunchenguid/dotfiles --title 'not executed'
+exit: 2
+stderr:
+mkdir: <synthetic-fixture>/audit-failure-home/state: Not a directory
+error: cannot create upstream authorization audit directory: <synthetic-fixture>/audit-failure-home/state/upstream-write-authorizations
+
+Underlying CLI invocations that actually executed (all mocks):
+MOCK git push origin HEAD (no network)
+MOCK gh api graphql --raw-field=query={viewer{login}} (no network)
+MOCK gh api /graphql --raw-field=query={viewer{login}} (no network)
+MOCK gh api https://api.github.com/graphql --raw-field=query={viewer{login}} (no network)
+MOCK gh api --method GET /repos/kunchenguid/dotfiles/commits -f sha=main -F per_page=100 (no network)
+MOCK gh pr create -R Jin-HoMLee/firstmate --title Synthetic integration (no network)
+MOCK gh issue create -R kunchenguid/dotfiles --title synthetic test (no network)
+
+No other mock writes occurred. In particular both reported Git bypasses, all GraphQL mutations and audit failure stopped before underlying execution.

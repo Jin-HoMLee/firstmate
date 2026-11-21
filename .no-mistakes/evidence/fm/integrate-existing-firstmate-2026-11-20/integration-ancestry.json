@@ -1,0 +1,63 @@
+{
+  "contract": "Normal merge integration retains installed committed history, integrated fork history and appended correction commits without rewriting them. This checks the current integration worktree only, not live installation state or current remote freshness.",
+  "head": "fbe2677866e01366613f55104e8bf9e5c30538c3",
+  "integration_merge": "a9a37b6be95786959a2426710a8fe42c40240b8a",
+  "merge_parents": [
+    "ab1e5c6de0df44fe8e5990108bc6ebc3827de96f",
+    "427056c4181c41074ad24f051f79919330df0fa5"
+  ],
+  "ancestry": [
+    {
+      "commit": "427056c4181c41074ad24f051f79919330df0fa5",
+      "subject": "fix(hermes): tolerate empty args under bash 3.2 set -u (#8399)",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "ab1e5c6de0df44fe8e5990108bc6ebc3827de96f",
+      "subject": "Add opt-in private Telegram inbox bridge (#6)",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "1508358300f43e03fb10e855956ff4bd2af7c9b4",
+      "subject": "no-mistakes(review): Fix upstream merge guards, auditing, and explicit GET classification",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "a9a37b6be95786959a2426710a8fe42c40240b8a",
+      "subject": "Merge current fork updates with installed integrations",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "7ef2c5390676aa120d82edca9fbe3a08557dc0ea",
+      "subject": "no-mistakes(review): Fix API endpoint parsing, nested shims, and OpenCode compatibility",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "069476c59b92bbd39f23421ecb6530295e04783b",
+      "subject": "Fix GraphQL endpoint and query option classification",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "eb0b8badd0d6ebeca918f13cedc23db01beba9b7",
+      "subject": "no-mistakes(review): Fix API help ownership and directory-dependent push protection",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "8149cb7e0919d4d59884ee0730cf555d12b973f7",
+      "subject": "no-mistakes(review): Consolidate argument ownership and preserve Git repository context",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "4e97a1e4eb1b35d37191f93fb674b23ef3b14969",
+      "subject": "no-mistakes(review): Require explicit single verified repository write destinations",
+      "retained_as_ancestor": true
+    },
+    {
+      "commit": "9337c25e000abb491f964a59b2c42ef62df37ed4",
+      "subject": "no-mistakes(review): Tighten mutation selectors, Git context, and GraphQL policy",
+      "retained_as_ancestor": true
+    }
+  ],
+  "validation_method": "git show -s --format=%P; git merge-base --is-ancestor <commit> HEAD for every retained commit",
+  "boundaries": "No fetch, push, PR, merge, live installation update or data relocation performed by this test phase."
+}

@@ -1,0 +1,100 @@
+RETAINED TELEGRAM CUSTOMIZATION: PRIVATE INBOX ROUND TRIP
+Only synthetic identities and message text are used; Telegram API is mocked.
+The actual fm-telegram CLI, inbox scripts and persistent SQLite journal execute locally.
+No credentials, running installation, services or live network are used.
+
+$ python3 <integration-worktree>/bin/fm-telegram.py --home <synthetic-home> approve --bot-id 1234 --user-id 55 --chat-id 55
+Locally approved. Only new messages qualify; nothing started or sent.
+
+Accepted synthetic private message:
+{
+  "update_id": 1,
+  "message": {
+    "message_id": 21,
+    "date": 1795221820,
+    "text": "Please retain my integration history. Literal text: $(touch NEVER_EXECUTED)",
+    "from": {
+      "id": 55,
+      "is_bot": false
+    },
+    "chat": {
+      "id": 55,
+      "type": "private"
+    }
+  }
+}
+Persisted inbox receipt:
+{
+  "schema": "fm-inbox-receipts.v1",
+  "home": ".test-phase-private/telegram-fixture",
+  "generated": "2026-11-21T00:43:40Z",
+  "pending": [
+    {
+      "id": "1795221819-wdl0Yw",
+      "at": "2026-11-21T00:43:39Z",
+      "source": "text",
+      "request_id": "telegram:1234:55:1",
+      "body": "Telegram private request (authenticated text, not command execution; existing approval rules still apply). Publish the answer with fm-inbox.sh reply against this note; only that authored answer returns to the approved private chat.\n\nPlease retain my integration history. Literal text: $(touch NEVER_EXECUTED)",
+      "acknowledged": false,
+      "announced": true,
+      "reply": null
+    }
+  ],
+  "handled": [],
+  "replies": [],
+  "reply_cursor": "",
+  "omitted": []
+}
+
+$ python3 <integration-worktree>/bin/fm-telegram.py --home <synthetic-home> status
+{"requests_captured": 1, "requests_awaiting_sent_answer": 1, "requests_without_collected_answer": 1, "pending_delivery_details": [], "more_pending_details": false, "deliveries": {}, "next_update": "2", "last_poll": "", "meaning": "counts are retained records, not lifetime totals; captured is queued, not answered; sent means API-confirmed or locally attested delivery of every part", "primary": {"schema": "fm-primary-ready.v1", "home": ".test-phase-private/telegram-fixture", "observed_at": "2026-11-21T00:43:40Z", "lock": {"state": "free", "pid": null, "live_harness": false}, "wake_consumer": {"state": "unknown", "reason": "supervision-model-unknown-for-home", "beacon_age_seconds": null}, "posture": {"state": "present"}, "can_receive": false}}
+
+Authored answer via real fm-inbox.sh reply:
+{
+  "schema": "fm-inbox-reply.v1",
+  "outcome": "created",
+  "id": "1795221819-wdl0Yw",
+  "path": "<synthetic-home>/state/inbox/.replies/1795221819-wdl0Yw"
+}
+
+Outgoing mocked Telegram API request (the actual user-facing reply):
+{
+  "method": "sendMessage",
+  "chat_id": 55,
+  "text": "The integration history is retained; merging and updating the installation still require explicit approval.",
+  "reply_parameters": {
+    "message_id": 21,
+    "allow_sending_without_reply": true
+  },
+  "link_preview_options": {
+    "is_disabled": true
+  },
+  "protect_content": true
+}
+
+Journal state after restart and duplicate-update replay:
+{
+  "inbound": [
+    [
+      1,
+      "1795221819-wdl0Yw",
+      "telegram:1234:55:1",
+      21
+    ]
+  ],
+  "delivery": [
+    [
+      "1795221819-wdl0Yw",
+      "reply",
+      "sent",
+      1,
+      ""
+    ]
+  ],
+  "outgoing_send_calls": 1
+}
+No duplicate reply was sent. Sent reply text is cleared from the transport delivery row.
+
+$ python3 <integration-worktree>/bin/fm-telegram.py --home <synthetic-home> status
+{"requests_captured": 1, "requests_awaiting_sent_answer": 0, "requests_without_collected_answer": 0, "pending_delivery_details": [], "more_pending_details": false, "deliveries": {"sent": 1}, "next_update": "2", "last_poll": "", "meaning": "counts are retained records, not lifetime totals; captured is queued, not answered; sent means API-confirmed or locally attested delivery of every part", "primary": {"schema": "fm-primary-ready.v1", "home": ".test-phase-private/telegram-fixture", "observed_at": "2026-11-21T00:43:42Z", "lock": {"state": "free", "pid": null, "live_harness": false}, "wake_consumer": {"state": "unknown", "reason": "supervision-model-unknown-for-home", "beacon_age_seconds": null}, "posture": {"state": "present"}, "can_receive": false}}
+

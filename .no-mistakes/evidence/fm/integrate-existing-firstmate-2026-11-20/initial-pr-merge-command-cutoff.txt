@@ -1,0 +1,11 @@
+Initial local test invocation
+Command: bash tests/fm-pr-merge.test.sh
+Harness command wait limit: 300 seconds
+Result: Command timed out after 300 seconds (no assertion failure reported before cutoff).
+Last observed output:
+ok - fm-pr-merge retries a failed Forgejo confirmation read and persists the merge authority
+Earlier requested-boundary observations:
+ok - fm-pr-merge refuses protected upstream mutations regardless of lifecycle merge authority
+ok - fm-pr-merge preserves explicitly authorized personal-fork merges
+Follow-up process inspection found no surviving fm-pr-merge.test.sh, fm-pr-merge.sh, or fm-pr-check.sh processes.
+The same script was subsequently launched asynchronously with private output capture; no repository test selection, timeout, or configuration was modified.

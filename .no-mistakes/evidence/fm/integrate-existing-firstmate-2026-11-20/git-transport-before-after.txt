@@ -1,0 +1,37 @@
+PRE-FIX / POST-FIX BEHAVIORAL REPRODUCTION
+Compare predecessor 9337c25e with target fbe26778 through the actual PreToolUse JSON transport.
+The same two reported shell commands execute only when the hook permits them. Underlying pushes are mocks.
+No source checkout or tracked file is changed; both primary fixtures are isolated copies.
+
+--- 9337c25e ---
+Proposed shell command: verb=push; git "$verb" https://github.com/kunchenguid/dotfiles.git HEAD
+PreToolUse exit: 0
+stdout: (empty)
+stderr: (empty)
+Shell execution (mock push, no network):
+MOCK underlying git push https://github.com/kunchenguid/dotfiles.git HEAD
+Effective destination: https://github.com/kunchenguid/dotfiles.git
+
+--- 9337c25e ---
+Proposed shell command: export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git; git push origin HEAD
+PreToolUse exit: 0
+stdout: (empty)
+stderr: (empty)
+Shell execution (mock push, no network):
+MOCK underlying git push origin HEAD
+Effective destination: git@github.com:kunchenguid/dotfiles.git
+
+--- fbe26778 ---
+Proposed shell command: verb=push; git "$verb" https://github.com/kunchenguid/dotfiles.git HEAD
+PreToolUse exit: 2
+stdout: {"decision":"deny","reason":"[protected-upstream-write] Git subcommand must be proved literal before a read exemption can be granted"}
+stderr: {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"},"systemMessage":"[protected-upstream-write] Git subcommand must be proved literal before a read exemption can be granted"}
+Shell execution prevented; mock push log remains empty.
+
+--- fbe26778 ---
+Proposed shell command: export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=git@github.com:kunchenguid/dotfiles.git; git push origin HEAD
+PreToolUse exit: 2
+stdout: {"decision":"deny","reason":"[protected-upstream-write] command-local Git environment or user context cannot be verified for a push"}
+stderr: {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"},"systemMessage":"[protected-upstream-write] command-local Git environment or user context cannot be verified for a push"}
+Shell execution prevented; mock push log remains empty.
+
